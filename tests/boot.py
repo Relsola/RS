@@ -48,9 +48,9 @@ def main():
             check_task_session(output, args.disk.with_name("user.elf"))
         passed = rc == 0
     elif args.case == "files":
-        # Each ELF load reads sectors and checks the entire file's CRC in guest code.
+        # This session also forks and execs numeric.elf and waits for four timer periods.
         rc, output, error = run_guest(args.vm, args.firmware, args.disk, FILE_COMMANDS + b"halt\n",
-                                      max_steps=10_000_000)
+                                      max_steps=12_000_000)
         if rc == 0:
             check_file_session(output, args.disk.parent)
         passed = rc == 0

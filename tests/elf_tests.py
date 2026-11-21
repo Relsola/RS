@@ -46,6 +46,10 @@ def main():
         "dynamic": executable(exit_code, segment_type=2),
         "truncated": executable(exit_code)[:80],
     }
+    for name, abi in (("single-abi", 2), ("double-abi", 4), ("quad-abi", 6), ("rve-abi", 8)):
+        file = bytearray(executable(exit_code))
+        struct.pack_into("<I", file, 48, abi)
+        fixtures[name] = file
     images = args.disk.parent
     with tempfile.TemporaryDirectory() as directory:
         temp = Path(directory)
@@ -69,6 +73,10 @@ def main():
         raise AssertionError(f"expected two fresh loads of hello: {serial!r}")
     expected = {
         "exit37": "user exit: 37",
+        "single-abi": "user exit: 37",
+        "double-abi": "user exit: 37",
+        "quad-abi": "run: expected a static RISC-V ELF64 executable",
+        "rve-abi": "run: expected a static RISC-V ELF64 executable",
         "readonly": "user fault: cause=15 epc=0x000000004001007c tval=0x0000000040010078",
         "bad-entry": "run: ELF entry is not an aligned instruction in executable data",
         "rwx": "run: unsupported ELF segment permissions",

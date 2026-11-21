@@ -1,4 +1,5 @@
 #include "trap.h"
+#include "context.h"
 #include "paging.h"
 #include "platform.h"
 #include "user/abi.h"
@@ -64,7 +65,7 @@ static void prepare_frame(unsigned slot, uintptr_t entry, unsigned a0, uintptr_t
     task->frame.x[REG_A0] = a0;
     task->frame.x[REG_A1] = argv;
     task->frame.epc = entry;
-    task->frame.status = STATUS_SPIE; /* SPP=U，sret 后恢复 S 级中断使能。 */
+    task->frame.status = STATUS_SPIE | context_reset(slot);
     task->state = RUNNABLE;
 }
 
@@ -136,6 +137,7 @@ static void exec_current(TrapFrame *frame, bool with_args)
     /* 下一次 sret 使用刚准备的新现场。ASID 和根页表地址都没变，也要同步旧翻译。 */
     discard_lr_reservation();
     user_activate(current);
+    context_select(current);
 }
 
 void run_tasks(TaskDemo demo)
@@ -159,6 +161,7 @@ static TrapFrame *activate_task(unsigned slot)
 {
     discard_lr_reservation();
     user_activate(slot);
+    context_select(slot);
     current = slot;
     return &tasks[slot].frame;
 }
@@ -212,6 +215,7 @@ static uint64_t fork_child(const TrapFrame *parent_frame)
     discard_lr_reservation();
     user_clone(0, 1);
     user_files_clone(0, 1);
+    context_fork(0, 1);
     tasks[1].frame = *parent_frame;
     tasks[1].frame.x[REG_A0] = 0;
     tasks[1].state = RUNNABLE;
@@ -237,6 +241,7 @@ static TrapFrame *wait_child(TrapFrame *frame)
 
 static TrapFrame *finish_task(uint64_t result)
 {
+    context_drop(current);
     user_files_release(current);
     user_release(current);
     tasks[current].state = SLOT_FREE;

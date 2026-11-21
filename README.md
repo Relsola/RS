@@ -32,6 +32,7 @@ System halted.
 | `cat /proc/diskstats` | 查看内核已提交的读请求、成功读取的扇区和失败批次。连续运行两次 `run hello.elf` 可以观察文件缓存命中 |
 | `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
 | `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
+| `run /numeric.elf` | 用向量浮点计算点积 165，跨页写入匿名内存，再通过定时器、`fork` 与 `exec` 检查寄存器隔离 |
 | `run /family.elf` | 父进程派生子进程。观察同一地址上父读到 `P`、子读到 `C`，继承的文件描述符则从同一游标接着读 |
 | `run /launch.elf` | 子进程执行 `exec` 换入磁盘上的 `hello.elf`。父进程继续执行原程序，等到子进程退出后打印完成消息 |
 | `run /wc.elf /readme.txt` | 将文件路径传给用户程序，读回 `2 12 64 /readme.txt`，分别是换行符数、词数和字节数 |
@@ -70,4 +71,5 @@ System halted.
 13. [Svnapot 的 64 KiB 映射](docs/svnapot.md)与 [Svinval 的批量失效](docs/svinval.md)分别对应磁盘缓存和写时复制的内核代码。
 14. [从一条 cbo.zero 到一张零页](docs/cache-blocks.md)跟踪固件授权、块边界和写时复制缺页。
 15. [跟踪一次磁盘读取](docs/block-io.md)，从扇区计数追到 virtio 队列，观察 CPU 和设备怎样交接缓冲区。
-16. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+16. [从点积到任务切换](docs/numeric.md)跟踪精确舍入、向量指令跨页恢复，以及父子进程的浮点与向量现场。
+17. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

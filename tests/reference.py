@@ -17,7 +17,7 @@ def read_until(connection, serial, marker):
         serial.extend(chunk)
 
 
-def run_reference(qemu, firmware, disk, commands):
+def run_reference(qemu, firmware, disk, commands, *, vlen=None):
     """Send a serial session ending in halt and return the raw UART bytes."""
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -27,7 +27,8 @@ def run_reference(qemu, firmware, disk, commands):
         # QEMU connects to the test's serial port. Send input only after the guest prompt.
         # -drive treats commas as option separators. The child runs in the disk's directory.
         disk_name = disk.name.replace(",", ",,")
-        command = [str(qemu.resolve()), "-machine", "virt", "-cpu", "rva23s64,pmp=on",
+        model = "rva23s64,pmp=on" + (f",vlen={vlen}" if vlen else "")
+        command = [str(qemu.resolve()), "-machine", "virt", "-cpu", model,
                    "-smp", "1", "-m", "128M", "-nodefaults", "-display", "none",
                    "-monitor", "none", "-bios", str(firmware.resolve()),
                    "-icount", "shift=6,align=off,sleep=off",

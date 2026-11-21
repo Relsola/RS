@@ -2,6 +2,7 @@
 #include "vfs.h"
 #include "paging.h"
 #include "trap.h"
+#include "context.h"
 
 #include <stddef.h>
 
@@ -160,6 +161,10 @@ static void execute(char *line)
     bool after_cr = false;
     if (!paging_enable()) {
         uart_puts("kernel error: Sv39 unavailable\n");
+        poweroff(true);
+    }
+    if (!context_init()) {
+        uart_puts("kernel error: vector contexts exceed kernel RAM\n");
         poweroff(true);
     }
     vfs_mount();

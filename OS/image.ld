@@ -19,5 +19,8 @@ SECTIONS {
         __stack_top = .;
     }
     ASSERT(__stack_top <= IMAGE_LIMIT, "image exceeds its RAM region")
+    /* 运行时按 vlenb 从栈顶上方的空闲内核 RAM 划出各任务的向量现场。 */
+    PROVIDE(__context_begin = __stack_top);
+    PROVIDE(__context_limit = IMAGE_LIMIT);
     /DISCARD/ : { *(.eh_frame*) *(.comment) }
 }

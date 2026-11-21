@@ -40,6 +40,10 @@ if(BUILD_TESTING)
     endforeach()
     set(RS_REFERENCE_QEMU "" CACHE FILEPATH "Optional qemu-system-riscv64 with the rva23s64 CPU model")
     if(RS_REFERENCE_QEMU)
+        add_test(NAME reference.numeric COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/numeric_reference.py" "$<TARGET_FILE:rs-vm>"
+            "${RS_REFERENCE_QEMU}" "${CMAKE_BINARY_DIR}/images")
+        set_tests_properties(reference.numeric PROPERTIES TIMEOUT 120)
         add_test(NAME reference.rva23s64 COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference.py" "${RS_REFERENCE_QEMU}" "${CMAKE_BINARY_DIR}/images")
         set_tests_properties(reference.rva23s64 PROPERTIES TIMEOUT 30)

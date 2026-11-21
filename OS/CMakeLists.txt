@@ -53,11 +53,11 @@ rs_guest_image(user user/user.ld rv64imac
 rs_guest_image(kernel image.ld rv64imac_zicbom_zicboz_zicsr_zifencei_sstc_svinval_svnapot
     SOURCES entry.S platform.c boot/disk.c kernel/fs.c kernel/vfs.c kernel/procfs.c kernel/elf.c
         kernel/shell.c kernel/user_files.c kernel/paging.c kernel/exec_args.c kernel/string.c
-        kernel/trap.c kernel/trap.S user/embed.S
+        kernel/trap.c kernel/trap.S kernel/context.c kernel/context.S user/embed.S
     FLAGS -DRS_SUPERVISOR=1 "-DRS_USER_BASE=${user_base}" "-DRS_USER_DATA_BASE=${user_data_base}" "-I${image_dir}"
         "-Wl,--defsym=IMAGE_BASE=${kernel_base},--defsym=IMAGE_LIMIT=0x80a00000"
     DEPENDS platform.h boot/disk.h boot/disk_format.h kernel/fs.h kernel/elf.h kernel/paging.h kernel/trap.h
-        kernel/vfs.h kernel/vfs_internal.h kernel/user_files.h kernel/exec_args.h kernel/string.h
+        kernel/vfs.h kernel/vfs_internal.h kernel/user_files.h kernel/exec_args.h kernel/string.h kernel/context.h
         user/abi.h user/layout.h "${image_dir}/user.bin")
 
 rs_guest_image(hello user/disk.ld rv64imac_zba_zbb_zcb_zicond ELF_ONLY
@@ -85,6 +85,11 @@ rs_guest_image(wc user/disk.ld rv64imac ELF_ONLY
     FLAGS "-Wl,--defsym=APP_BASE=0x40010000"
     DEPENDS user/abi.h user/api.h)
 
+rs_guest_image(numeric user/disk.ld rv64gcv ELF_ONLY
+    SOURCES user/numeric.c user/numeric.S user/syscall.S
+    FLAGS -mabi=lp64d "-Wl,--defsym=APP_BASE=0x40010000"
+    DEPENDS user/abi.h user/api.h user/layout.h)
+
 set(disk_builder "${CMAKE_CURRENT_SOURCE_DIR}/../tools/mkdisk.py")
 add_custom_command(
     OUTPUT "${image_dir}/disk.img"
@@ -96,10 +101,11 @@ add_custom_command(
         --file "family.elf=${image_dir}/family.elf"
         --file "launch.elf=${image_dir}/launch.elf"
         --file "wc.elf=${image_dir}/wc.elf"
+        --file "numeric.elf=${image_dir}/numeric.elf"
     DEPENDS "${image_dir}/kernel.bin" "${disk_builder}"
         "${CMAKE_CURRENT_SOURCE_DIR}/files/readme.txt" "${image_dir}/hello.elf"
         "${image_dir}/memory.elf" "${image_dir}/family.elf" "${image_dir}/launch.elf"
-        "${image_dir}/wc.elf"
+        "${image_dir}/wc.elf" "${image_dir}/numeric.elf"
     COMMENT "Packing the boot disk"
     VERBATIM
 )

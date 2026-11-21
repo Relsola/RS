@@ -7,14 +7,14 @@ from serial_session import command_output
 FILE_COMMANDS = (b"ls\nls /proc\ncat readme.txt\ncat /proc/..//./readme.txt\n"
                  b"cat /readme.txt/..\nrun hello.elf\nrun readme.txt\ncat missing\n"
                  b"run /memory.elf\nrun /family.elf\nrun /launch.elf\n"
-                 b'run /launch.elf /wc.elf "/readme.txt"\n')
+                 b'run /launch.elf /wc.elf "/readme.txt"\nrun /numeric.elf\n')
 
 
 def check_file_session(serial, images):
     serial = serial.replace(b"\r\n", b"\n")
     readme = (Path(__file__).resolve().parents[1] / "OS/files/readme.txt").read_bytes()
     listing = f"readme.txt  {len(readme)} bytes\n"
-    for name in ("hello.elf", "memory.elf", "family.elf", "launch.elf", "wc.elf"):
+    for name in ("hello.elf", "memory.elf", "family.elf", "launch.elf", "wc.elf", "numeric.elf"):
         listing += f"{name}  {(images / name).stat().st_size} bytes\n"
     contents = readme.replace(b"\r\n", b"\n")
     newlines = readme.count(b"\n")
@@ -25,6 +25,8 @@ def check_file_session(serial, images):
         b"cat /proc/..//./readme.txt": contents,
         b"cat /readme.txt/..": b"cat: not a directory\n",
         b"run hello.elf": b"hello from disk ELF\nuser exit: 0\n",
+        b"run /numeric.elf": (b"numeric: dot = 165\nnumeric: exec cleared registers\nchild exit: 0\n"
+                              b"numeric: fork, timer and wait preserved registers\nuser exit: 0\n"),
         b"run readme.txt": b"run: expected a static RISC-V ELF64 executable\n",
         b"cat missing": b"cat: file not found\n",
         b"run /memory.elf": contents + b"memory.elf: file copied, pages released\nuser exit: 0\n",

@@ -28,7 +28,8 @@ const char *elf_parse(const uint8_t *file, size_t size, ElfImage *image)
         file[3] != 'F' || file[4] != 2 || file[5] != 1 || file[6] != 1 ||
         file[7] != 0 || file[8] != 0 || little16(file + 16) != 2 ||
         little16(file + 18) != 243 || little32(file + 20) != 1 ||
-        (little32(file + 48) & ~UINT32_C(1)) || little16(file + 52) != ELF_HEADER_SIZE) {
+        (little32(file + 48) & ~UINT32_C(7)) || (little32(file + 48) & 6) == 6 ||
+        little16(file + 52) != ELF_HEADER_SIZE) {
         return "expected a static RISC-V ELF64 executable";
     }
     uint64_t table = little64(file + 32);
