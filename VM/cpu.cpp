@@ -127,6 +127,15 @@ void cpu_step(Cpu *cpu, Bus *bus)
         }
         break;
     }
+    case 0x07: case 0x27: // 浮点和向量访存使用同一主操作码，宽度编码互斥。
+    case 0x43: case 0x47: case 0x4b: case 0x4f: case 0x53: case 0x57:
+        if (opcode == 0x57 || ((opcode == 7 || opcode == 0x27) && (function < 1 || function > 3))) {
+            legal = cpu_vector(cpu, bus, insn, &result, &writes_rd);
+        } else {
+            legal = cpu_float(cpu, bus, insn, &result, &writes_rd);
+        }
+        if (cpu->trapped) return;
+        break;
     case 0x2f: // AMO
         legal = cpu_atomic(cpu, bus, insn, a, b, &result);
         if (cpu->trapped) {

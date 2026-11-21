@@ -1,6 +1,6 @@
 #include "cpu_privilege.h"
 
-constexpr uint64_t SSTATUS_WRITABLE = SIE | SPIE | SPP | SUM | MXR;
+constexpr uint64_t SSTATUS_WRITABLE = SIE | SPIE | SPP | SUM | MXR | FS | VS;
 constexpr uint64_t MSTATUS_WRITABLE = SSTATUS_WRITABLE | MIE | MPIE | MPP | MPRV | TVM | TW | TSR;
 constexpr uint64_t UXL64 = uint64_t{2} << 32, SXL64 = uint64_t{2} << 34;
 constexpr uint64_t PMPADDR_MASK = (uint64_t{1} << 54) - 1;
@@ -94,8 +94,19 @@ static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
         }
         return true;
     }
+    uint64_t sd = ((cpu->mstatus & FS) == FS || (cpu->mstatus & VS) == VS) ? uint64_t{1} << 63 : 0;
     switch (csr) {
-    case 0x100: *value = (cpu->mstatus & SSTATUS_WRITABLE) | UXL64; break;
+    case 0x001: *value = cpu->fcsr & 31; return (cpu->mstatus & FS) != 0;
+    case 0x002: *value = cpu->fcsr >> 5; return (cpu->mstatus & FS) != 0;
+    case 0x003: *value = cpu->fcsr; return (cpu->mstatus & FS) != 0;
+    case 0x008: *value = cpu->vstart; return (cpu->mstatus & VS) != 0;
+    case 0x009: *value = cpu->vcsr & 1; return (cpu->mstatus & VS) != 0;
+    case 0x00a: *value = cpu->vcsr >> 1; return (cpu->mstatus & VS) != 0;
+    case 0x00f: *value = cpu->vcsr; return (cpu->mstatus & VS) != 0;
+    case 0xc20: *value = cpu->vl; return (cpu->mstatus & VS) != 0;
+    case 0xc21: *value = cpu->vtype; return (cpu->mstatus & VS) != 0;
+    case 0xc22: *value = Cpu::VLEN_BYTES; return (cpu->mstatus & VS) != 0;
+    case 0x100: *value = (cpu->mstatus & SSTATUS_WRITABLE) | UXL64 | sd; break;
     case 0x104: *value = cpu->mie & cpu->mideleg; break; // sie 仅暴露已委托的中断位
     case 0x105: *value = cpu->stvec; break;
     case 0x106: *value = cpu->scounteren; break;
@@ -117,10 +128,10 @@ static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
         *value = cpu->stimecmp;
         break;
     case 0x180: *value = cpu->satp; break;
-    case 0x300: *value = cpu->mstatus | UXL64 | SXL64; break;
-    case 0x301: // misa：RV64、A、B、C、I、M、S、U。Zicsr、Zifencei 无单独位。
-        *value = (uint64_t{2} << 62) | (1u << 20) | (1u << 18) | (1u << 12)
-               | (1u << 8) | (1u << 2) | (1u << 1) | 1u;
+    case 0x300: *value = cpu->mstatus | UXL64 | SXL64 | sd; break;
+    case 0x301: // RV64 的 MISA 单字母扩展，V 的参数由 vtype 和 vlenb 提供。
+        *value = (uint64_t{2} << 62) | (1u << 21) | (1u << 20) | (1u << 18) | (1u << 12)
+               | (1u << 8) | (1u << 5) | (1u << 3) | (1u << 2) | (1u << 1) | 1u;
         break;
     case 0x302: *value = cpu->medeleg; break;
     case 0x303: *value = cpu->mideleg; break;
@@ -191,6 +202,13 @@ static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
         return;
     }
     switch (csr) {
+    case 0x001: cpu->fcsr = (cpu->fcsr & 0xe0) | (value & 31); cpu->mstatus |= FS; break;
+    case 0x002: cpu->fcsr = (cpu->fcsr & 31) | ((value & 7) << 5); cpu->mstatus |= FS; break;
+    case 0x003: cpu->fcsr = value & 255; cpu->mstatus |= FS; break;
+    case 0x008: cpu->vstart = value & (Cpu::VLEN_BYTES * 8 - 1); cpu->mstatus |= VS; break;
+    case 0x009: cpu->vcsr = (cpu->vcsr & 6) | (value & 1); cpu->mstatus |= VS; break;
+    case 0x00a: cpu->vcsr = (cpu->vcsr & 1) | ((value & 3) << 1); cpu->mstatus |= VS; break;
+    case 0x00f: cpu->vcsr = value & 7; cpu->mstatus |= VS; break;
     case 0x100: cpu->mstatus = (cpu->mstatus & ~SSTATUS_WRITABLE) | (value & SSTATUS_WRITABLE); break;
     case 0x104: cpu->mie = (cpu->mie & ~cpu->mideleg) | (value & cpu->mideleg); break;
     case 0x105: cpu->stvec = value & ~uint64_t{3}; break;

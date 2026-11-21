@@ -17,6 +17,12 @@ struct Cpu
 {
     uint64_t pc;
     uint64_t x[32];
+    uint64_t f[32];
+    unsigned fcsr;
+    static constexpr unsigned VLEN_BYTES = 16;
+    uint8_t v[32][VLEN_BYTES];
+    uint64_t vtype = uint64_t{1} << 63;
+    unsigned vl, vstart, vcsr;
     Privilege privilege = MACHINE;
     uint64_t mstatus;
     uint64_t medeleg;

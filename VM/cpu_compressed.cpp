@@ -23,10 +23,10 @@ static uint32_t r_type(unsigned opcode, unsigned func, unsigned high, unsigned r
     return (high << 25) | (rs2 << 20) | (rs1 << 15) | (func << 12) | (rd << 7) | opcode;
 }
 
-static uint32_t store(unsigned func, unsigned base, unsigned source, uint32_t imm)
+static uint32_t store(unsigned func, unsigned base, unsigned source, uint32_t imm, unsigned opcode = 0x23)
 {
     return field(imm, 11, 5, 25) | (source << 20) | (base << 15) | (func << 12)
-        | field(imm, 4, 0, 7) | 0x23;
+        | field(imm, 4, 0, 7) | opcode;
 }
 
 static uint32_t branch_zero(unsigned func, unsigned source, uint32_t offset)
@@ -57,9 +57,10 @@ static uint32_t quadrant_zero(uint16_t code)
         const unsigned imm = field(code, 12, 10, 3) | field(code, 6, 6, 2) | field(code, 5, 5, 6);
         return operation == 2 ? i_type(0x03, 2, reg, base, imm) : store(2, base, reg, imm);
     }
-    case 3: case 7: { // C.LD / C.SD
+    case 1: case 3: case 5: case 7: { // C.FLD / C.LD / C.FSD / C.SD
         const unsigned imm = field(code, 12, 10, 3) | field(code, 6, 5, 6);
-        return operation == 3 ? i_type(0x03, 3, reg, base, imm) : store(3, base, reg, imm);
+        if (operation < 4) return i_type(operation == 1 ? 0x07 : 0x03, 3, reg, base, imm);
+        return store(3, base, reg, imm, operation == 5 ? 0x27 : 0x23);
     }
     case 4: { // Zcb：字节偏移的 bit 0 在编码 bit 6，bit 1 在编码 bit 5。
         const unsigned half_offset = field(code, 5, 5, 1);
@@ -154,8 +155,9 @@ static uint32_t quadrant_two(uint16_t code)
         unsigned imm = (high << 5) | field(code, 6, 4, 2) | field(code, 3, 2, 6);
         return rd ? i_type(0x03, 2, rd, 2, imm) : 0;
     }
-    case 3: { // C.LDSP
+    case 1: case 3: { // C.FLDSP 允许 f0 作为目的寄存器。
         unsigned imm = (high << 5) | field(code, 6, 5, 3) | field(code, 4, 2, 6);
+        if ((code >> 13) == 1) return i_type(0x07, 3, rd, 2, imm);
         return rd ? i_type(0x03, 3, rd, 2, imm) : 0;
     }
     case 4:
@@ -170,9 +172,9 @@ static uint32_t quadrant_two(uint16_t code)
         unsigned imm = field(code, 12, 9, 2) | field(code, 8, 7, 6);
         return store(2, 2, rs2, imm);
     }
-    case 7: { // C.SDSP
+    case 5: case 7: { // C.FSDSP / C.SDSP
         unsigned imm = field(code, 12, 10, 3) | field(code, 9, 7, 6);
-        return store(3, 2, rs2, imm);
+        return store(3, 2, rs2, imm, (code >> 13) == 5 ? 0x27 : 0x23);
     }
     default: return 0;
     }

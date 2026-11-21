@@ -1,5 +1,6 @@
 add_library(rs-cpu STATIC cpu.cpp cpu_integer.cpp cpu_privilege.cpp cpu_mmu.cpp
-    cpu_bitmanip.cpp cpu_compressed.cpp cpu_atomic.cpp)
+    cpu_bitmanip.cpp cpu_compressed.cpp cpu_atomic.cpp cpu_float.cpp float_bits.cpp
+    cpu_vector.cpp vector_alu.cpp vector_float.cpp)
 target_include_directories(rs-cpu PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_library(rs-board STATIC bus.cpp console.cpp virtio.cpp)
@@ -10,6 +11,9 @@ target_link_libraries(rs-vm PRIVATE rs-cpu rs-board)
 set_target_properties(rs-vm PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(BUILD_TESTING)
+    add_executable(rs-numeric-tests tests/numeric_tests.cpp)
+    target_link_libraries(rs-numeric-tests PRIVATE rs-cpu rs-board)
+    add_test(NAME vm.numeric COMMAND rs-numeric-tests)
     add_executable(rs-cpu-tests tests/cpu_tests.cpp)
     target_link_libraries(rs-cpu-tests PRIVATE rs-cpu)
     add_test(NAME vm.instructions COMMAND rs-cpu-tests)

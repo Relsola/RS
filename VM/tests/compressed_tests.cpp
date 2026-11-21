@@ -60,6 +60,8 @@ static constexpr Example EXAMPLES[] = {
     {0x9c75, 0xfff44413}, // c.not s0
     {0x9d51, 0x02c50533}, // c.mul a0, a2
     // HINT 合法退休，展开计算时写 x0 或保持寄存器的旧值。
+    {0x2000, 0x00043407}, {0xa000, 0x00843027}, // c.fld / c.fsd f8, 0(x8)
+    {0x2002, 0x00013007}, {0xa002, 0x00013027}, // c.fldsp / c.fsdsp f0, 0(sp)
     {0x0005, 0x00100013}, // c.nop with imm=1
     {0x0281, 0x00028293}, // c.addi t0, 0
     {0x4005, 0x00100013}, // c.li zero, 1
@@ -90,7 +92,6 @@ int main()
         0x8002,         // C.JR x0
         0x9c79, 0x9c7d, // 两个未分配的 Zcb 单操作数编号
         0x8c40, 0x9000, 0x9400, 0x9800, 0x9c00, // C.SH 的 bit 6、未分配的访存编码
-        0x2000, 0xa000, 0x2002, 0xa002, // compressed floating-point instructions
         0xffff,         // not a compressed encoding
     };
     for (uint16_t code : ILLEGAL) {

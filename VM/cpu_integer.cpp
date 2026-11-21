@@ -11,7 +11,7 @@ static int64_t signed_value(uint64_t value)
 
 // 将两个 64 位数拆成 32 位的“数位”。先积累中间两列的进位，
 // 再计算高半部，因此不依赖 __int128 或某个平台的乘法 intrinsic。
-static uint64_t mul_high_unsigned(uint64_t a, uint64_t b)
+uint64_t mul_high_unsigned(uint64_t a, uint64_t b)
 {
     const uint64_t a0 = static_cast<uint32_t>(a);
     const uint64_t b0 = static_cast<uint32_t>(b);

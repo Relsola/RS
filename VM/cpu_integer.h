@@ -12,3 +12,4 @@ constexpr uint64_t sign_extend(uint64_t value, unsigned bits)
 
 // 解码 OP / OP-IMM 及其 W 变种；保留编码返回 false。
 bool cpu_integer(uint32_t instruction, uint64_t lhs, uint64_t rhs, uint64_t *result);
+uint64_t mul_high_unsigned(uint64_t a, uint64_t b);
