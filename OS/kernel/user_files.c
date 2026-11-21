@@ -5,26 +5,47 @@
 enum { FIRST_FD = 3, FILES_PER_TASK = 4, READ_LIMIT = 256 };
 
 typedef struct {
-    bool open;
+    unsigned references;
     VfsFile file;
-} Descriptor;
+} OpenFile;
 
-static Descriptor descriptors[USER_TASK_COUNT][FILES_PER_TASK];
+/* 每个槽存的是引用。一次 open 有一份游标，fork 后两张表可以引用同一份。 */
+static OpenFile *descriptors[USER_TASK_COUNT][FILES_PER_TASK];
+static OpenFile open_files[USER_TASK_COUNT * FILES_PER_TASK];
+
+static void drop_descriptor(OpenFile **descriptor)
+{
+    if (*descriptor) {
+        --(*descriptor)->references;
+        *descriptor = nullptr;
+    }
+}
 
 void user_files_release(unsigned slot)
 {
     for (unsigned i = 0; i < FILES_PER_TASK; ++i) {
-        descriptors[slot][i].open = false;
+        drop_descriptor(&descriptors[slot][i]);
     }
 }
 
-static Descriptor *lookup(unsigned slot, uint64_t fd)
+void user_files_clone(unsigned parent, unsigned child)
+{
+    /* 调度器给出一个空闲子槽。这里只增加引用，保留文件偏移与 procfs 的打开快照。 */
+    for (unsigned i = 0; i < FILES_PER_TASK; ++i) {
+        OpenFile *file = descriptors[parent][i];
+        descriptors[child][i] = file;
+        if (file) {
+            ++file->references;
+        }
+    }
+}
+
+static OpenFile *lookup(unsigned slot, uint64_t fd)
 {
     if (fd < FIRST_FD || fd >= FIRST_FD + FILES_PER_TASK) {
         return nullptr;
     }
-    Descriptor *entry = &descriptors[slot][fd - FIRST_FD];
-    return entry->open ? entry : nullptr;
+    return descriptors[slot][fd - FIRST_FD];
 }
 
 long user_file_open(unsigned slot, uintptr_t path, size_t length)
@@ -39,14 +60,22 @@ long user_file_open(unsigned slot, uintptr_t path, size_t length)
         }
     }
     name[length] = '\0';
-    for (unsigned i = 0; i < FILES_PER_TASK; ++i) {
-        Descriptor *entry = &descriptors[slot][i];
-        if (!entry->open) {
+    unsigned index = 0;
+    while (index < FILES_PER_TASK && descriptors[slot][index]) {
+        ++index;
+    }
+    if (index == FILES_PER_TASK) {
+        return -1;
+    }
+    for (unsigned i = 0; i < USER_TASK_COUNT * FILES_PER_TASK; ++i) {
+        OpenFile *entry = &open_files[i];
+        if (!entry->references) {
             if (vfs_open(name, &entry->file)) {
                 return -1;
             }
-            entry->open = true;
-            return (long)(FIRST_FD + i);
+            entry->references = 1;
+            descriptors[slot][index] = entry;
+            return (long)(FIRST_FD + index);
         }
     }
     return -1;
@@ -55,7 +84,7 @@ long user_file_open(unsigned slot, uintptr_t path, size_t length)
 long user_file_read(unsigned slot, uint64_t fd, uintptr_t destination, size_t count)
 {
     uint8_t buffer[READ_LIMIT];
-    Descriptor *entry = lookup(slot, fd);
+    OpenFile *entry = lookup(slot, fd);
     if (!entry || count > sizeof(buffer)) {
         return -1;
     }
@@ -74,10 +103,9 @@ long user_file_read(unsigned slot, uint64_t fd, uintptr_t destination, size_t co
 
 long user_file_close(unsigned slot, uint64_t fd)
 {
-    Descriptor *entry = lookup(slot, fd);
-    if (!entry) {
+    if (!lookup(slot, fd)) {
         return -1;
     }
-    entry->open = false;
+    drop_descriptor(&descriptors[slot][fd - FIRST_FD]);
     return 0;
 }

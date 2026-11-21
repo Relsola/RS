@@ -10,7 +10,8 @@
 | `user.elf` | RV64IMAC，LP64，入口在用户虚拟地址 `0x40000000` | 两个任务执行同一用户镜像。代码和常量嵌入内核的只读页，内核分别分配并清零各任务的栈和数据页 |
 | `hello.elf` | RV64IMAC + Zba、Zbb、Zcb、Zicond，LP64，用户装载区从 `0x40010000` 开始 | C23 程序与汇编辅助函数静态链接为 ELF64，可执行段和可写段分别记录在程序头中，整份 ELF 作为文件写入 RSFS |
 | `memory.elf` | RV64IMAC，LP64，与 `hello.elf` 使用同一用户装载区 | 独立的 C23 程序，调用 `open/read/close` 和 `map/unmap`，观察匿名页的按需分配与跨页读文件 |
-| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 写入启动头、内核、RSFS 目录、`readme.txt`、`hello.elf` 和 `memory.elf` |
+| `family.elf` | RV64IMAC，LP64，同一用户装载区 | 独立的 C23 程序，派生子进程并观察匿名页、文件偏移和退出码 |
+| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 写入启动头、内核、RSFS 目录、`readme.txt` 和上述三个磁盘程序 |
 
 在两端之间传输数据时，磁盘头、描述符和寄存器都有显式位宽与小端格式。来宾的汇编文件实现启动、特权切换、陷阱现场和系统调用入口。宿主键盘和终端的系统差异集中在 `console.cpp` 的平台条件分支。[宿主配置](../CMakeLists.txt) · [来宾配置](../OS/CMakeLists.txt) · [平台终端](../VM/console.cpp)
 
@@ -40,8 +41,9 @@ python tools/mkdisk.py build/debug/images/kernel.bin build/debug/images/alternat
 | `boot.console` | 用真固件和真磁盘启动。检查命令结果、CRLF、退格、错误命令、超长行恢复及关机 |
 | `boot.user` | 在同一次启动中运行两次用户程序，中间触发一次受保护设备读取故障。核对定时器计数前进、正常退出和 shell 恢复 |
 | `boot.tasks` | 观察双方主动让出和同地址私有数据，验证定时器打断纯计算、恢复后的校验值及单任务故障后的运行顺序。用 PATH 中的 `llvm-nm` 读取本次 `user.elf` 的循环边界 |
-| `boot.files` | 通过 VFS 列出磁盘根目录和 `/proc`，解析含 `.`、`..` 的路径，运行两个磁盘 ELF，检查文件与目录混用时的诊断 |
+| `boot.files` | 通过 VFS 列出磁盘根目录和 `/proc`，解析含 `.`、`..` 的路径，运行三个磁盘 ELF，检查文件与目录混用时的诊断 |
 | `disk.vfs_vm` | 在标准盘和替换盘运行真实用户程序，检查按需补页、按打开时间生成的内存快照、跨页读取、页池耗尽和任务回收 |
+| `disk.fork` | 用替换盘检查父子页框计数、原子指令缺页重试、跨页读取失败时文件偏移与缓冲区的原子性、满池写入、退出顺序与定时器抢占 |
 | `disk.rsfs` | 用不同磁盘检查目录 CRC、重名、相交、容量越界、截断和旧盘兼容。另损坏一个文件并确认同盘其他文件可读 |
 | `disk.elf` | 给同一内核换一张盘，观察新程序以 37 退出、向只读代码写入时触发页故障，以及多种无效 ELF 被拒绝。重复装载同一程序还会检查数据和 BSS 是否恢复初值 |
 | `boot.ring-wrap` | 为内核载荷附加内容不同的扇区，让 8 项 virtqueue 重用槽位，核对整段 CRC 并启动 |

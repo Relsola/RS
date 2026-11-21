@@ -32,7 +32,7 @@ if(BUILD_TESTING)
             "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
         set_tests_properties(boot.${scenario} PROPERTIES TIMEOUT 30)
     endforeach()
-    foreach(format IN ITEMS rsfs elf vfs_vm)
+    foreach(format IN ITEMS rsfs elf vfs_vm fork)
         add_test(NAME disk.${format} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/${format}_tests.py" "$<TARGET_FILE:rs-vm>"
             "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")

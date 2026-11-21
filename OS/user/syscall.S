@@ -18,6 +18,8 @@
     syscall user_close, RS_SYS_CLOSE
     syscall user_map,   RS_SYS_MAP
     syscall user_unmap, RS_SYS_UNMAP
+    syscall user_fork,  RS_SYS_FORK
+    syscall user_wait,  RS_SYS_WAIT
 
     .section .text.user_yield_reserved, "ax"
     .globl user_yield_reserved

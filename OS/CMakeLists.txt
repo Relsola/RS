@@ -68,6 +68,11 @@ rs_guest_image(memory user/disk.ld rv64imac ELF_ONLY
     FLAGS "-Wl,--defsym=APP_BASE=0x40010000"
     DEPENDS user/abi.h user/api.h user/layout.h)
 
+rs_guest_image(family user/disk.ld rv64imac ELF_ONLY
+    SOURCES user/family.c user/syscall.S
+    FLAGS "-Wl,--defsym=APP_BASE=0x40010000"
+    DEPENDS user/abi.h user/api.h)
+
 set(disk_builder "${CMAKE_CURRENT_SOURCE_DIR}/../tools/mkdisk.py")
 add_custom_command(
     OUTPUT "${image_dir}/disk.img"
@@ -76,8 +81,10 @@ add_custom_command(
         --file "readme.txt=${CMAKE_CURRENT_SOURCE_DIR}/files/readme.txt"
         --file "hello.elf=${image_dir}/hello.elf"
         --file "memory.elf=${image_dir}/memory.elf"
+        --file "family.elf=${image_dir}/family.elf"
     DEPENDS "${image_dir}/kernel.bin" "${disk_builder}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/files/readme.txt" "${image_dir}/hello.elf" "${image_dir}/memory.elf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/files/readme.txt" "${image_dir}/hello.elf"
+        "${image_dir}/memory.elf" "${image_dir}/family.elf"
     COMMENT "Packing the boot disk"
     VERBATIM
 )

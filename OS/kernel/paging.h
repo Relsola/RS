@@ -22,6 +22,7 @@ void kernel_activate(void);
 void user_activate(unsigned slot);
 void user_prepare(unsigned slot);
 void user_prepare_elf(const ElfImage *image);
+void user_clone(unsigned parent_slot, unsigned child_slot);
 uintptr_t user_map(unsigned slot, size_t bytes);
 bool user_unmap(unsigned slot, uintptr_t base);
 void user_release(unsigned slot);

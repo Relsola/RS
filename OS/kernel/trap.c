@@ -23,8 +23,9 @@ void enter_tasks(void);
 void discard_lr_reservation(void);
 void sync_user_instructions(void);
 
+typedef enum { SLOT_FREE, RUNNABLE, WAITING_FOR_CHILD, ZOMBIE } TaskState;
 typedef struct {
-    bool runnable;
+    TaskState state;
     /* U 陷阱从 frame 顶端向下增长，C 分派函数使用其下方私有的内核栈。 */
     alignas(16) uint8_t kernel_stack[8192];
     TrapFrame frame;
@@ -34,8 +35,11 @@ static_assert(USER_TASK_COUNT == 2);
 static_assert(offsetof(Task, frame) % 16 == 0);
 static Task tasks[USER_TASK_COUNT];
 static unsigned current;
-static bool running_pair;
+static bool fixed_pair;
 static bool time_sliced;
+/* 前台程序使用槽 0，子进程使用槽 1。槽可复用，用户所见的 ID 单调递增。 */
+static uint64_t last_child_id;
+static uint64_t child_result;
 
 void timer_start(void)
 {
@@ -59,15 +63,15 @@ static void prepare_frame(unsigned slot, uintptr_t entry, unsigned program_mode)
     task->frame.x[REG_A0] = program_mode;
     task->frame.epc = entry;
     task->frame.status = STATUS_SPIE; /* SPP=U，sret 后恢复 S 级中断使能。 */
-    task->runnable = true;
+    task->state = RUNNABLE;
 }
 
 static void enter_single_task(uintptr_t entry, unsigned program_mode)
 {
-    running_pair = false;
+    fixed_pair = false;
     time_sliced = false;
     prepare_frame(0, entry, program_mode);
-    tasks[1].runnable = false;
+    tasks[1].state = SLOT_FREE;
     enter_tasks();
 }
 
@@ -98,7 +102,7 @@ void run_tasks(TaskDemo demo)
         [TASKS_FAULT]   = {RS_USER_FAULT_A, RS_USER_SURVIVE_B},
         [TASKS_MEMORY]  = {RS_USER_MEMORY_A, RS_USER_MEMORY_B},
     };
-    running_pair = true;
+    fixed_pair = true;
     time_sliced = demo == TASKS_PREEMPT;
     for (unsigned slot = 0; slot < USER_TASK_COUNT; ++slot) {
         user_prepare(slot);
@@ -129,8 +133,8 @@ TrapFrame *first_task_frame(void)
 static TrapFrame *schedule(const char *reason, uint64_t epc)
 {
     unsigned next = current ^ 1;
-    if (tasks[next].runnable) {
-        if (reason) {
+    if (tasks[next].state == RUNNABLE) {
+        if (fixed_pair && reason) {
             uart_puts(current == 0 ? "switch A -> B: " : "switch B -> A: ");
             uart_puts(reason);
             uart_puts(" epc=");
@@ -139,7 +143,7 @@ static TrapFrame *schedule(const char *reason, uint64_t epc)
         }
         return activate_task(next);
     }
-    if (tasks[current].runnable) {
+    if (tasks[current].state == RUNNABLE) {
         return &tasks[current].frame;
     }
     discard_lr_reservation();
@@ -149,17 +153,61 @@ static TrapFrame *schedule(const char *reason, uint64_t epc)
 
 static const char *task_label(void)
 {
-    if (!running_pair) {
-        return "user";
+    if (fixed_pair) {
+        return current == 0 ? "task A" : "task B";
     }
-    return current == 0 ? "task A" : "task B";
+    return current == 0 ? "user" : "child";
 }
 
-static TrapFrame *finish_task(void)
+static uint64_t fork_child(const TrapFrame *parent_frame)
+{
+    if (fixed_pair || current != 0 || tasks[1].state != SLOT_FREE || last_child_id == INT64_MAX) {
+        return UINT64_MAX;
+    }
+    /* 克隆的 EPC 已跨过 ecall。复制用户现场，子进程下次陷入时使用自己的内核栈。 */
+    discard_lr_reservation();
+    user_clone(0, 1);
+    user_files_clone(0, 1);
+    tasks[1].frame = *parent_frame;
+    tasks[1].frame.x[REG_A0] = 0;
+    tasks[1].state = RUNNABLE;
+    time_sliced = true;
+    return ++last_child_id;
+}
+
+static TrapFrame *wait_child(TrapFrame *frame)
+{
+    uint64_t id = frame->x[REG_A0];
+    if (fixed_pair || current != 0 || id != last_child_id || tasks[1].state == SLOT_FREE) {
+        frame->x[REG_A0] = UINT64_MAX;
+        return frame;
+    }
+    if (tasks[1].state == ZOMBIE) {
+        frame->x[REG_A0] = child_result;
+        tasks[1].state = SLOT_FREE;
+        return frame;
+    }
+    tasks[0].state = WAITING_FOR_CHILD;
+    return schedule(nullptr, 0);
+}
+
+static TrapFrame *finish_task(uint64_t result)
 {
     user_files_release(current);
     user_release(current);
-    tasks[current].runnable = false;
+    tasks[current].state = SLOT_FREE;
+    if (!fixed_pair && current == 1) {
+        if (tasks[0].state == WAITING_FOR_CHILD) {
+            /* wait 的返回值写进父进程保存的 a0，恢复时从 ecall 后继续。 */
+            tasks[0].frame.x[REG_A0] = result;
+            tasks[0].state = RUNNABLE;
+        } else if (tasks[0].state == RUNNABLE) {
+            child_result = result;
+            tasks[1].state = ZOMBIE;
+        }
+    } else if (tasks[1].state == ZOMBIE) {
+        tasks[1].state = SLOT_FREE; /* 父进程已退出，无人再领取这个结果。 */
+    }
     return schedule(nullptr, 0);
 }
 
@@ -215,7 +263,7 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
         uart_puts(" tval=");
         uart_put_hex(value);
         uart_puts("\n");
-        return finish_task();
+        return finish_task(UINT64_C(0) - (256 + cause));
     }
 
     /* ECALL 是 32 位指令；保存的 EPC 指向 ECALL 本身。 */
@@ -243,15 +291,20 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
     case RS_SYS_UNMAP:
         frame->x[REG_A0] = user_unmap(current, frame->x[REG_A0]) ? 0 : UINT64_MAX;
         break;
+    case RS_SYS_FORK:
+        frame->x[REG_A0] = fork_child(frame);
+        break;
+    case RS_SYS_WAIT:
+        return wait_child(frame);
     case RS_SYS_YIELD:
         frame->x[REG_A0] = 0;
         return schedule("yield", frame->epc - 4);
     case RS_SYS_EXIT:
         uart_puts(task_label());
         uart_puts(" exit: ");
-        uart_put_u64(frame->x[REG_A0]);
+        uart_put_u64((uint32_t)frame->x[REG_A0]);
         uart_puts("\n");
-        return finish_task();
+        return finish_task((uint32_t)frame->x[REG_A0]);
     default:
         frame->x[REG_A0] = UINT64_MAX;
         break;

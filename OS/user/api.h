@@ -13,5 +13,7 @@ long user_read(long fd, void *buffer, size_t count);
 long user_close(long fd);
 void *user_map(size_t bytes);
 long user_unmap(void *base);
+long user_fork(void);
+long user_wait(long child);
 
 #endif

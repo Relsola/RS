@@ -48,4 +48,4 @@ llvm-objdump -d -M no-aliases build/debug/images/hello.elf | Select-String 'c\.l
 
 前台程序使用任务槽 0。内核收回该槽上一次装入的用户映射，保留私有用户栈，建立新页表项，并在进入 U 模式前执行 `fence.i`。切换页表时的 `sfence.vma` 使新的地址翻译生效，`fence.i` 让这颗 hart 后续取指看见刚写入的代码。两个操作针对不同的状态。程序正常退出或发生无法处理的用户态故障时，内核回收其描述符和匿名页并恢复 shell 的现场。访问已预留的匿名页可触发按需分配，成功时返回用户程序重试。[安装用户页](../OS/kernel/paging.c) · [准备现场](../OS/kernel/trap.c) · [取指同步与返回](../OS/kernel/trap.S)
 
-当前 `run` 每次装入一个前台程序。程序入口直接使用已准备好的用户栈。内嵌和磁盘应用都可使用 `write`、`ticks`、`exit`、`yield`、`open`、`read`、`close`、`map`、`unmap`。用默认盘运行 `run memory.elf`，可以看到独立 ELF 用文件描述符向自己的匿名缓冲区读取文本。[文件描述符](vfs.md) · [虚拟内存](virtual-memory.md) · [系统调用约定](../OS/user/abi.h) · [双任务调度](tasks.md)
+默认盘上的三个程序使用同一套装载器。`run hello.elf` 验证代码、可写数据和输出，`run memory.elf` 把文件读进跨页匿名缓冲区，`run family.elf` 在运行中调用 `fork` 派生子进程，再用 `wait` 领取其退出码。子进程从调用点继续执行，沿用父进程已经装入的 ELF 映像。[文件描述符](vfs.md) · [虚拟内存](virtual-memory.md) · [系统调用约定](../OS/user/abi.h) · [父子进程实例](fork.md)

@@ -31,6 +31,7 @@ System halted.
 | `cat /proc/meminfo` | 打开一个由内核即时生成的文件，查看匿名页预留数、实际驻留数和累计处理的用户缺页数 |
 | `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
 | `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
+| `run /family.elf` | 父进程派生子进程。观察同一地址上父读到 `P`、子读到 `C`，继承的文件描述符则从同一游标接着读 |
 | `ticks` | 查看内核实际处理过的监管定时器中断次数 |
 | `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
 | `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
@@ -60,4 +61,5 @@ System halted.
 8. [从反汇编看 Zcb 和 Zicond](docs/compact-integer.md)解释上述程序实际执行的压缩访存和条件清零指令。
 9. [虚拟文件系统](docs/vfs.md)解释磁盘文件和内核生成的 `/proc/meminfo` 如何共用路径、打开、读取接口。
 10. [匿名虚拟内存](docs/virtual-memory.md)追踪预留地址、按需分配物理页、重试指令与释放映射。
-11. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+11. [跟踪一次 fork 和 wait](docs/fork.md)把同一段串口输出对应到陷阱帧、共享页框和文件游标。
+12. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
