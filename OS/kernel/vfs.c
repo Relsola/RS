@@ -21,7 +21,7 @@ void vfs_mount(void)
     }
 }
 
-static bool equal(const char *left, const char *right)
+bool vfs_name_equal(const char *left, const char *right)
 {
     while (*left && *left == *right) {
         ++left;
@@ -34,7 +34,7 @@ static const VfsMount *child_mount(const VfsMount *mount, const void *directory,
 {
     if (mount == &mounts[0] && !directory) {
         for (unsigned i = 1; i < MOUNT_COUNT; ++i) {
-            if (equal(mounts[i].name, name)) {
+            if (vfs_name_equal(mounts[i].name, name)) {
                 return &mounts[i];
             }
         }
@@ -78,10 +78,10 @@ static const char *resolve(const char *path, Location *here)
             name[used++] = *path++;
         }
         name[used] = '\0';
-        if (equal(name, ".")) {
+        if (vfs_name_equal(name, ".")) {
             continue;
         }
-        if (equal(name, "..")) {
+        if (vfs_name_equal(name, "..")) {
             if (depth) {
                 *here = parents[--depth];
             }

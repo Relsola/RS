@@ -61,7 +61,7 @@ def main():
 
         invalid = [(b"ls", b"ls: invalid directory\n"),
                    (b"cat readme.txt", b"cat: invalid directory\n"),
-                   (b"ls /proc", b"meminfo\n"),
+                   (b"ls /proc", b"meminfo\ndiskstats\n"),
                    (b"echo alive", b"alive\n")]
         image = bytearray(original)
         image[directory + 8] ^= 1
@@ -96,7 +96,7 @@ def main():
         listing = b"".join(name + f"  {size} bytes\n".encode()
                            for name, (_, _, size) in entries.items() if name != b"readme.txt")
         boot("mount hides disk entry", image, [(b"ls", listing + b"proc/\n"),
-                                               (b"ls /proc", b"meminfo\n"),
+                                               (b"ls /proc", b"meminfo\ndiskstats\n"),
                                                (b"cat /proc", b"cat: is a directory\n")])
 
         image = bytearray(original)

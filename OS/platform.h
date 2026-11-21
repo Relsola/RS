@@ -1,6 +1,10 @@
 #ifndef RS_PLATFORM_H
 #define RS_PLATFORM_H
 
+#define RS_CACHE_BLOCK_BYTES 64
+
+#ifndef __ASSEMBLER__
+#include <stddef.h>
 #include <stdint.h>
 
 enum {
@@ -18,6 +22,10 @@ char uart_getc(void);
 
 /* 设备顺序与取指同步由 RISC-V 汇编实现。 */
 void io_fence(void);
+void dma_clean(const volatile void *start, size_t bytes);
+void dma_flush(const volatile void *start, size_t bytes);
+void dma_inval(const volatile void *start, size_t bytes);
 [[noreturn]] void enter_kernel(uintptr_t address);
 
+#endif
 #endif

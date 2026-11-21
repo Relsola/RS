@@ -34,7 +34,7 @@ def boot(args, disk, commands):
 def standard_disk(args):
     commands = b"cat /proc/meminfo\nls /proc\ncat /readme.txt\nrun /memory.elf\ncat /proc/meminfo\n"
     serial = boot(args, args.disk, commands)
-    expect("proc directory", command_output(serial, b"ls /proc"), b"meminfo\n")
+    expect("proc directory", command_output(serial, b"ls /proc"), b"meminfo\ndiskstats\n")
     readme = command_output(serial, b"cat /readme.txt")
     expect("readme copy", command_output(serial, b"run /memory.elf"), readme + DONE)
     # Two U loads touch fresh anonymous mappings. The adjacent page for read() is

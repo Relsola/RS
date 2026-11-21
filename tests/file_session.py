@@ -20,7 +20,7 @@ def check_file_session(serial, images):
     newlines = readme.count(b"\n")
     expected = {
         b"ls": listing.encode() + b"proc/\n",
-        b"ls /proc": b"meminfo\n",
+        b"ls /proc": b"meminfo\ndiskstats\n",
         b"cat readme.txt": contents,
         b"cat /proc/..//./readme.txt": contents,
         b"cat /readme.txt/..": b"cat: not a directory\n",

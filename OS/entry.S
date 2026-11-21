@@ -1,3 +1,5 @@
+#include "platform.h"
+
     .section .text.entry, "ax"
     .balign 4
     .globl _start
@@ -7,9 +9,15 @@ _start:
     csrw sscratch, zero
     la t0, supervisor_trap_entry
     csrw stvec, t0
+#if defined(__riscv_zicboz) || defined(__riscv_zicbom)
+    li t0, 0
 #ifdef __riscv_zicboz
-    li t0, 1 << 7
-    csrs senvcfg, t0       # 允许 U 模式在有写权限的内存上执行 cbo.zero。
+    ori t0, t0, (1 << 7)               # CBZE
+#endif
+#ifdef __riscv_zicbom
+    ori t0, t0, (1 << 6) | (1 << 4)    # CBCFE，U 的 INVAL 按 flush 执行。
+#endif
+    csrw senvcfg, t0
 #endif
 #else
     la t0, .Ltrap
@@ -42,6 +50,26 @@ io_fence:
     fence iorw, iorw
     ret
 
+    # 遍历与 [a0,a0+a1) 相交的块，a1 为零时不触碰任何块。
+    .macro dma_range name, instruction
+    .section .text.\name, "ax"
+    .globl \name
+\name:
+#ifdef __riscv_zicbom
+    beqz a1, 2f
+    add t0, a0, a1
+    andi a0, a0, -RS_CACHE_BLOCK_BYTES
+1:  \instruction (a0)
+    addi a0, a0, RS_CACHE_BLOCK_BYTES
+    bltu a0, t0, 1b
+#endif
+2:  ret
+    .endm
+
+    dma_range dma_clean, cbo.clean
+    dma_range dma_flush, cbo.flush
+    dma_range dma_inval, cbo.inval
+
     .section .text.enter_kernel, "ax"
     .globl enter_kernel
 enter_kernel:
@@ -57,8 +85,11 @@ enter_kernel:
     # 允许 S 模式读取 time、设置 stimecmp，并将定时器中断交给 S 处理。
     csrsi mcounteren, 2
     li t0, (1 << 63) | (1 << 7)  # menvcfg.STCE 和 CBZE
+#ifdef __riscv_zicbom
+    ori t0, t0, (1 << 6) | (3 << 4)    # 允许 S 驱动清理、刷回和丢弃缓存块。
+#endif
     csrs menvcfg, t0
-    # S 还须获准访问 senvcfg，才能自行授予 U 模式块清零权限。
+    # S 还须获准访问 senvcfg，才能为 U 模式设置缓存块操作权限。
     li t0, 1 << 62
     csrs mstateen0, t0
     csrr t1, misa
@@ -97,7 +128,7 @@ zero_page:
 .Lzero_page:
 #ifdef __riscv_zicboz
     cbo.zero (a0)
-    addi a0, a0, 64
+    addi a0, a0, RS_CACHE_BLOCK_BYTES
 #else
     sd zero, 0(a0)
     addi a0, a0, 8

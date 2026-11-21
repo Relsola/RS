@@ -1,32 +1,6 @@
 #include "paging.h"
 #include "vfs_internal.h"
-
-static const char meminfo[] = "meminfo";
-
-static bool lookup(const void *parent, const char *name, VfsNode *found)
-{
-    if (parent) {
-        return false;
-    }
-    unsigned i = 0;
-    while (name[i] && name[i] == meminfo[i]) {
-        ++i;
-    }
-    if (name[i] != meminfo[i]) {
-        return false;
-    }
-    *found = (VfsNode){ meminfo, false };
-    return true;
-}
-
-static bool entry_at(const void *parent, unsigned index, VfsEntry *entry)
-{
-    if (parent || index) {
-        return false;
-    }
-    *entry = (VfsEntry){ meminfo, false, SIZE_MAX };
-    return true;
-}
+#include "boot/disk.h"
 
 static char *append_metric(char *out, const char *name, uint64_t number)
 {
@@ -60,6 +34,57 @@ static void open_meminfo(VfsFile *file)
     file->size = (size_t)(p - file->snapshot);
 }
 
+static void open_diskstats(VfsFile *file)
+{
+    static_assert(sizeof("read_requestsread_sectorsread_errors") - 1 + 6 + 3 * 20
+                  <= VFS_SNAPSHOT_BYTES);
+    DiskStats stats = disk_stats();
+    char *p = append_metric(file->snapshot, "read_requests", stats.read_requests);
+    p = append_metric(p, "read_sectors", stats.read_sectors);
+    p = append_metric(p, "read_errors", stats.read_errors);
+    file->size = (size_t)(p - file->snapshot);
+}
+
+typedef struct {
+    const char *name;
+    void (*snapshot)(VfsFile *file);
+} ProcFile;
+
+static const ProcFile files[] = {
+    { "meminfo", open_meminfo },
+    { "diskstats", open_diskstats },
+};
+enum { FILE_COUNT = sizeof(files) / sizeof(files[0]) };
+
+static bool lookup(const void *parent, const char *name, VfsNode *found)
+{
+    if (parent) {
+        return false;
+    }
+    for (unsigned i = 0; i < FILE_COUNT; ++i) {
+        if (vfs_name_equal(name, files[i].name)) {
+            *found = (VfsNode){ &files[i], false };
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool entry_at(const void *parent, unsigned index, VfsEntry *entry)
+{
+    if (parent || index >= FILE_COUNT) {
+        return false;
+    }
+    *entry = (VfsEntry){ files[index].name, false, SIZE_MAX };
+    return true;
+}
+
+static void open_file(VfsFile *file)
+{
+    const ProcFile *node = file->node;
+    node->snapshot(file);
+}
+
 static const char *contents(const VfsFile *file, const uint8_t **bytes)
 {
     *bytes = (const uint8_t *)file->snapshot;
@@ -68,5 +93,5 @@ static const char *contents(const VfsFile *file, const uint8_t **bytes)
 
 const VfsOps procfs_ops = {
     .lookup = lookup, .entry_at = entry_at,
-    .open = open_meminfo, .contents = contents,
+    .open = open_file, .contents = contents,
 };

@@ -19,5 +19,6 @@ typedef struct VfsOps {
 
 extern const VfsOps rsfs_ops;
 extern const VfsOps procfs_ops;
+bool vfs_name_equal(const char *left, const char *right);
 
 #endif

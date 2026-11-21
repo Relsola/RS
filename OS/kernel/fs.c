@@ -8,7 +8,7 @@ enum { TABLE_START = 32, RECORD_BYTES = 32, FILE_LIMIT = (SECTOR_BYTES - TABLE_S
 
 static FsFile files[FILE_LIMIT];
 static unsigned file_count;
-alignas(16) static uint8_t sector_buffer[SECTOR_BYTES];
+alignas(RS_CACHE_BLOCK_BYTES) static uint8_t sector_buffer[SECTOR_BYTES];
 alignas(FS_MAX_FILE_BYTES) uint8_t fs_file_cache[FS_MAX_FILE_BYTES];
 static const FsFile *cached_file;
 static_assert(FS_MAX_FILE_BYTES % SECTOR_BYTES == 0);
@@ -33,15 +33,6 @@ static bool zero_bytes(const uint8_t *bytes, size_t count)
     return true;
 }
 
-static bool equal_name(const char *left, const char *right)
-{
-    while (*left && *left == *right) {
-        ++left;
-        ++right;
-    }
-    return *left == *right;
-}
-
 /* 名称存储为 ASCII，最多 19 字节，包含终止零和尾部填零。 */
 static bool decode_name(char *name, const uint8_t *record)
 {
@@ -60,9 +51,9 @@ static bool decode_name(char *name, const uint8_t *record)
     return false;
 }
 
-static uint64_t sector_count(uint32_t size)
+static uint32_t sector_count(uint32_t size)
 {
-    return ((uint64_t)size + SECTOR_BYTES - 1) / SECTOR_BYTES;
+    return size / SECTOR_BYTES + (size % SECTOR_BYTES != 0);
 }
 
 static bool decode_record(unsigned index, const uint8_t *record, uint64_t first_data, uint64_t capacity)
@@ -82,8 +73,8 @@ static bool decode_record(unsigned index, const uint8_t *record, uint64_t first_
     }
     for (unsigned i = 0; i < index; ++i) {
         const FsFile *other = &files[i];
-        uint64_t other_end = other->first_sector + sector_count(other->size);
-        if (equal_name(file->name, other->name) ||
+        uint64_t other_end = (uint64_t)other->first_sector + sector_count(other->size);
+        if (vfs_name_equal(file->name, other->name) ||
             (file->size && other->size && start < other_end && other->first_sector < end)) {
             return false;
         }
@@ -96,7 +87,7 @@ static const char *fs_mount(void)
     uint64_t capacity;
     file_count = 0;
     cached_file = nullptr;
-    if (!disk_open(&capacity) || !capacity || !disk_read_sector(0, sector_buffer)) {
+    if (!disk_open(&capacity) || !capacity || !disk_read_sectors(0, 1, sector_buffer)) {
         return "disk unavailable";
     }
     uint32_t kernel_size = load_u32_le(sector_buffer + 8);
@@ -111,7 +102,7 @@ static const char *fs_mount(void)
     if (!magic_is(sector_buffer + 16, "RSFS0001") || directory == capacity) {
         return "invalid directory";
     }
-    if (!disk_read_sector(directory, sector_buffer)) {
+    if (!disk_read_sectors(directory, 1, sector_buffer)) {
         return "directory read failed";
     }
     if (!magic_is(sector_buffer, "RSFS0001") ||
@@ -138,7 +129,7 @@ static const char *fs_mount(void)
 static const FsFile *fs_find(const char *name)
 {
     for (unsigned i = 0; i < file_count; ++i) {
-        if (equal_name(name, files[i].name)) {
+        if (vfs_name_equal(name, files[i].name)) {
             return &files[i];
         }
     }
@@ -155,11 +146,8 @@ static const char *fs_load(const FsFile *file, const uint8_t **bytes)
     /* DMA 会覆盖旧内容。遇到短读或 CRC 错误时，旧标签必须已经失效。 */
     cached_file = nullptr;
     /* 实际 DMA 以完整扇区为单位，静态缓冲区已按可接收的最大文件向上对齐。 */
-    uint64_t count = sector_count(file->size);
-    for (uint64_t i = 0; i < count; ++i) {
-        if (!disk_read_sector(file->first_sector + i, fs_file_cache + i * SECTOR_BYTES)) {
-            return "file read failed";
-        }
+    if (!disk_read_sectors(file->first_sector, sector_count(file->size), fs_file_cache)) {
+        return "file read failed";
     }
     if (crc32(fs_file_cache, file->size) != file->crc32) {
         return "file CRC mismatch";

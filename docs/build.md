@@ -5,8 +5,8 @@
 | 产物 | 编译目标 | 链接与运行环境 |
 | --- | --- | --- |
 | Windows `rs-vm.exe` | 本机 x64，C++23，`CMAKE_CXX_COMPILER=clang` | CMake 指定系统链接器。`clang -fuse-ld=link` 调用微软 `link.exe`，使用 MSVC 标准库、CRT 和 Windows SDK |
-| `firmware.elf` | `riscv64-unknown-elf`，RV64IM + Zicsr、Zifencei、Smstateen、Sstc，LP64 | `clang` 调用 `ld.lld`，由链接脚本决定入口和地址 |
-| `kernel.elf` | RV64IMAC + Zicboz、Zicsr、Zifencei、Sstc、Svinval、Svnapot，LP64 | freestanding C23，使用自编入口、串口和内核函数 |
+| `firmware.elf` | `riscv64-unknown-elf`，RV64IM + Zicbom、Zicsr、Zifencei、Smstateen、Sstc，LP64 | `clang` 调用 `ld.lld`，由链接脚本决定入口和地址 |
+| `kernel.elf` | RV64IMAC + Zicbom、Zicboz、Zicsr、Zifencei、Sstc、Svinval、Svnapot，LP64 | freestanding C23，使用自编入口、串口和内核函数 |
 | `user.elf` | RV64IMAC，LP64，入口在用户虚拟地址 `0x40000000` | 两个任务执行同一用户镜像。代码和常量嵌入内核的只读页，内核分别分配并清零各任务的栈和数据页 |
 | `hello.elf` | RV64IMAC + Zba、Zbb、Zcb、Zicond，LP64，用户装载区从 `0x40010000` 开始 | C23 程序与汇编辅助函数静态链接为 ELF64，可执行段和可写段分别记录在程序头中，整份 ELF 作为文件写入 RSFS |
 | `memory.elf` | RV64IMAC，LP64，与 `hello.elf` 使用同一用户装载区 | 独立的 C23 程序，调用 `open/read/close` 和 `map/unmap`，观察匿名页的按需分配与跨页读文件 |
@@ -47,6 +47,7 @@ python tools/mkdisk.py build/debug/images/kernel.bin build/debug/images/alternat
 | `disk.vfs_vm` | 在标准盘和替换盘运行真实用户程序，检查按需补页、按打开时间生成的内存快照、跨页读取、页池耗尽和任务回收 |
 | `disk.fork` | 用替换盘检查父子页框计数、原子指令缺页重试、跨页读取失败时文件偏移与缓冲区的原子性、满池写入、退出顺序与定时器抢占 |
 | `disk.rsfs` | 检查目录 CRC、重名、相交、容量越界、截断、独立文件校验和旧盘兼容。另用满 64 KiB 的文件覆盖缓存的所有子页，并执行文件末尾的入口 |
+| `disk.block_io` | 在 shell 中核对批量磁盘读取、缓存命中和统计快照。启动后缩短一次性测试盘，检查部分完成的批次与失败后的缓存恢复 |
 | `disk.exec` | 检查父子换入 ELF 后的入口、BSS、文件偏移、旧代码与回收。覆盖带引号和空参数、跨页字符串和指针表、数量和长度边界、失败回退，以及 U 模式块清零触发的写时复制 |
 | `disk.elf` | 给同一内核换一张盘，观察新程序以 37 退出、向只读代码写入时触发页故障，以及多种无效 ELF 被拒绝。重复装载同一程序还会检查数据和 BSS 是否恢复初值 |
 | `boot.ring-wrap` | 为内核载荷附加内容不同的扇区，让 8 项 virtqueue 重用槽位，核对整段 CRC 并启动 |
@@ -54,7 +55,7 @@ python tools/mkdisk.py build/debug/images/kernel.bin build/debug/images/alternat
 | `vm.instructions` | 整数边界、Zicond、CSR、特权切换、PMP、Sv39、跨页取指及 Sstc。双根表用例执行真实的 `satp` 切换，分别验证同一虚拟地址的取指、数据和权限 |
 | `vm.atomics` | 测试 LR/SC、九类 AMO 的两种宽度、符号扩展、页表别名、访问权限、碰撞后的重新尝试 |
 | `vm.svnapot` | 用非恒等映射逐页取指，检查 64 KiB 的两端、跨页数据读写、保留编码、Svade 与 PMP |
-| `vm.cache-blocks` | 检查块内非对齐操作数、块外字节、LR 保留、M/S/U 执行许可、Sv39 与 PMP 故障、MMIO 边界和预取提示 |
+| `vm.cache-blocks` | 检查清零和三种管理指令的块边界、M/S/U 授权、只读映射与 A/D 位、PMP、MMIO、LR 保留，以及预取提示 |
 | `vm.bitmanip`、`vm.compressed` | 用已知编码检查位操作、压缩展开、Zcb、提示编码及保留编码 |
 | `vm.virtio` | 比对磁盘和 DMA 缓冲区，检查完成长度、越界地址、只读请求、异常描述符链，以及设备改写 RAM 后 LR 保留是否失效 |
 
@@ -74,7 +75,7 @@ ctest --preset release
 python tests/reference.py (Get-Command qemu-system-riscv64).Source build/debug/images
 ```
 
-脚本选择 `virt` 板和 `rva23s64,pmp=on`。此板的固件在把控制权交给 S 模式前会设置 PMP，因此显式打开该机器级设施。块设备设为现代 virtio-mmio、只读原始镜像，固件和内核各自扫描设备插槽。测试通过本机回环串口等待提示符，检查 `info`、回显，并执行与自研 VM 相同的用户态、双任务和磁盘文件会话，其中包括 `run /launch.elf`。向 CMake 提供 `-DRS_REFERENCE_QEMU=<可执行文件绝对路径>` 会额外注册 `reference.rva23s64` 和 `reference.exec`。后者在替换盘上复用 `disk.exec` 的程序和断言。[参考机测试](../tests/reference.py) · [映像替换测试](../tests/exec_tests.py) · [QEMU virt 板文档](https://www.qemu.org/docs/master/system/riscv/virt.html)
+脚本选择 `virt` 板和 `rva23s64,pmp=on`。此板的固件在把控制权交给 S 模式前会设置 PMP，因此显式打开该机器级设施。块设备设为现代 virtio-mmio、只读原始镜像，固件和内核各自扫描设备插槽。向 CMake 提供 `-DRS_REFERENCE_QEMU=<可执行文件绝对路径>` 会额外注册三项对照。`reference.rva23s64` 检查磁盘启动、串口、用户态和双任务会话。`reference.exec` 在替换盘上检查进程更换映像。`reference.block_io` 使用与自研 VM 相同的用例核对多扇区读取、计数快照与用户态缓存管理指令。[参考机测试](../tests/reference.py) · [映像替换测试](../tests/exec_tests.py) · [磁盘批量读取测试](../tests/block_io_tests.py) · [QEMU virt 板文档](https://www.qemu.org/docs/master/system/riscv/virt.html)
 
 参考脚本用 `-icount shift=6,align=off,sleep=off` 让 QEMU 的虚拟时间随来宾指令数推进。若按宿主墙钟计时，较快的主机可能让 A 在第一个时间片内算完整个循环。两台机器的回归均要求中断实际落在循环内，允许中断 PC 和总 tick 数因机器而异。[双任务验收](../tests/task_session.py) · [QEMU 指令计时](https://www.qemu.org/docs/master/devel/tcg-icount.html)
 

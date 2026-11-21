@@ -2,7 +2,7 @@
 #include "disk_format.h"
 #include "platform.h"
 
-alignas(16) static uint8_t header[SECTOR_BYTES];
+alignas(RS_CACHE_BLOCK_BYTES) static uint8_t header[SECTOR_BYTES];
 
 [[noreturn]] static void boot_error(const char *text)
 {
@@ -19,7 +19,7 @@ alignas(16) static uint8_t header[SECTOR_BYTES];
     if (!disk_open(&capacity)) {
         boot_error("virtio-blk unavailable");
     }
-    if (capacity == 0 || !disk_read_sector(0, header)) {
+    if (capacity == 0 || !disk_read_sectors(0, 1, header)) {
         boot_error("cannot read sector 0");
     }
     static const char magic[] = "RSDISK01";
@@ -38,10 +38,8 @@ alignas(16) static uint8_t header[SECTOR_BYTES];
         boot_error("truncated kernel");
     }
     uint8_t *const kernel = (uint8_t *)(uintptr_t)RS_KERNEL_BASE;
-    for (uint32_t i = 0; i < sectors; ++i) {
-        if (!disk_read_sector(1 + i, kernel + i * SECTOR_BYTES)) {
-            boot_error("kernel sector read failed");
-        }
+    if (!disk_read_sectors(1, sectors, kernel)) {
+        boot_error("kernel sector read failed");
     }
     if (crc32(kernel, size) != load_u32_le(header + 12)) {
         boot_error("kernel CRC mismatch");

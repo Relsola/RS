@@ -40,7 +40,7 @@ function(rs_guest_image name script arch)
     endif()
 endfunction()
 
-rs_guest_image(firmware image.ld rv64im_zicsr_zifencei_smstateen_sstc
+rs_guest_image(firmware image.ld rv64im_zicbom_zicsr_zifencei_smstateen_sstc
     SOURCES entry.S platform.c boot/firmware.c boot/disk.c
     FLAGS "-Wl,--defsym=IMAGE_BASE=0x80000000,--defsym=IMAGE_LIMIT=${kernel_base}"
     DEPENDS platform.h boot/disk.h boot/disk_format.h)
@@ -50,7 +50,7 @@ rs_guest_image(user user/user.ld rv64imac
     FLAGS "-DRS_USER_BASE=${user_base}" "-Wl,--defsym=USER_BASE=${user_base},--defsym=USER_DATA_BASE=${user_data_base}"
     DEPENDS user/abi.h user/api.h user/layout.h)
 
-rs_guest_image(kernel image.ld rv64imac_zicboz_zicsr_zifencei_sstc_svinval_svnapot
+rs_guest_image(kernel image.ld rv64imac_zicbom_zicboz_zicsr_zifencei_sstc_svinval_svnapot
     SOURCES entry.S platform.c boot/disk.c kernel/fs.c kernel/vfs.c kernel/procfs.c kernel/elf.c
         kernel/shell.c kernel/user_files.c kernel/paging.c kernel/exec_args.c kernel/string.c
         kernel/trap.c kernel/trap.S user/embed.S

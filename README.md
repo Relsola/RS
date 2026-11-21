@@ -29,6 +29,7 @@ System halted.
 | --- | --- |
 | `ls /`、`cat /readme.txt` | 通过虚拟文件系统列出根目录，读取只读磁盘上的文件 |
 | `cat /proc/meminfo` | 打开一个由内核即时生成的文件，查看匿名页预留数、实际驻留数和累计处理的用户缺页数 |
+| `cat /proc/diskstats` | 查看内核已提交的读请求、成功读取的扇区和失败批次。连续运行两次 `run hello.elf` 可以观察文件缓存命中 |
 | `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
 | `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
 | `run /family.elf` | 父进程派生子进程。观察同一地址上父读到 `P`、子读到 `C`，继承的文件描述符则从同一游标接着读 |
@@ -68,4 +69,5 @@ System halted.
 12. [从 fork 到 exec](docs/exec.md)跟踪进程更换程序时，代码页与文件的去向，并在栈布局表中找到 `argc` 对应的每个参数。
 13. [Svnapot 的 64 KiB 映射](docs/svnapot.md)与 [Svinval 的批量失效](docs/svinval.md)分别对应磁盘缓存和写时复制的内核代码。
 14. [从一条 cbo.zero 到一张零页](docs/cache-blocks.md)跟踪固件授权、块边界和写时复制缺页。
-15. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+15. [跟踪一次磁盘读取](docs/block-io.md)，从扇区计数追到 virtio 队列，观察 CPU 和设备怎样交接缓冲区。
+16. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

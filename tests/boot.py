@@ -55,11 +55,11 @@ def main():
             check_file_session(output, args.disk.parent)
         passed = rc == 0
     elif args.case == "ring-wrap":
-        # Distinct trailing sectors force both rings to revisit slots before CRC validation,
-        # even if a future kernel shrinks to fit in the 8-entry queue.
+        # Eight sectors per request, eight slots per ring. The extra 65 sectors
+        # force a reused slot even if the original kernel becomes much smaller.
         image = args.disk.read_bytes()
         size, = struct.unpack_from("<I", image, 8)
-        kernel = image[512:512 + size] + b"".join(bytes([i]) * 512 for i in range(1, 13))
+        kernel = image[512:512 + size] + b"".join(bytes([i]) * 512 for i in range(1, 66))
         header = struct.pack("<8sII", b"RSDISK01", len(kernel), zlib.crc32(kernel))
         with tempfile.TemporaryDirectory() as tmp:
             disk = Path(tmp) / "many-sectors.img"
