@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "vfs_internal.h"
 #include "boot/disk.h"
 #include "boot/disk_format.h"
 #include "platform.h"
@@ -9,6 +10,7 @@ static FsFile files[FILE_LIMIT];
 static unsigned file_count;
 alignas(16) static uint8_t sector_buffer[SECTOR_BYTES];
 alignas(16) static uint8_t file_buffer[FS_MAX_FILE_BYTES];
+static const FsFile *cached_file;
 static_assert(FS_MAX_FILE_BYTES % SECTOR_BYTES == 0);
 
 static bool magic_is(const uint8_t *field, const char *magic)
@@ -89,10 +91,11 @@ static bool decode_record(unsigned index, const uint8_t *record, uint64_t first_
     return true;
 }
 
-const char *fs_mount(void)
+static const char *fs_mount(void)
 {
     uint64_t capacity;
     file_count = 0;
+    cached_file = nullptr;
     if (!disk_open(&capacity) || !capacity || !disk_read_sector(0, sector_buffer)) {
         return "disk unavailable";
     }
@@ -132,17 +135,7 @@ const char *fs_mount(void)
     return nullptr;
 }
 
-unsigned fs_count(void)
-{
-    return file_count;
-}
-
-const FsFile *fs_at(unsigned index)
-{
-    return index < file_count ? &files[index] : nullptr;
-}
-
-const FsFile *fs_find(const char *name)
+static const FsFile *fs_find(const char *name)
 {
     for (unsigned i = 0; i < file_count; ++i) {
         if (equal_name(name, files[i].name)) {
@@ -152,12 +145,15 @@ const FsFile *fs_find(const char *name)
     return nullptr;
 }
 
-const char *fs_load(const FsFile *file, const uint8_t **bytes)
+static const char *fs_load(const FsFile *file, const uint8_t **bytes)
 {
     *bytes = nullptr;
-    if (!file) {
-        return "file not found";
+    if (file == cached_file) {
+        *bytes = file_buffer;
+        return nullptr;
     }
+    /* DMA 会覆盖旧内容。遇到短读或 CRC 错误时，旧标签必须已经失效。 */
+    cached_file = nullptr;
     /* 实际 DMA 以完整扇区为单位，静态缓冲区已按可接收的最大文件向上对齐。 */
     uint64_t count = sector_count(file->size);
     for (uint64_t i = 0; i < count; ++i) {
@@ -168,6 +164,43 @@ const char *fs_load(const FsFile *file, const uint8_t **bytes)
     if (crc32(file_buffer, file->size) != file->crc32) {
         return "file CRC mismatch";
     }
+    cached_file = file;
     *bytes = file_buffer;
     return nullptr;
 }
+
+static bool lookup(const void *parent, const char *name, VfsNode *found)
+{
+    const FsFile *file = parent ? nullptr : fs_find(name);
+    if (!file) {
+        return false;
+    }
+    *found = (VfsNode){ file, false };
+    return true;
+}
+
+static bool entry_at(const void *parent, unsigned index, VfsEntry *entry)
+{
+    if (parent || index >= file_count) {
+        return false;
+    }
+    const FsFile *file = &files[index];
+    *entry = (VfsEntry){ file->name, false, file->size };
+    return true;
+}
+
+static void open_file(VfsFile *file)
+{
+    const FsFile *disk_file = file->node;
+    file->size = disk_file->size;
+}
+
+static const char *contents(const VfsFile *file, const uint8_t **bytes)
+{
+    return fs_load(file->node, bytes);
+}
+
+const VfsOps rsfs_ops = {
+    .mount = fs_mount, .lookup = lookup, .entry_at = entry_at,
+    .open = open_file, .contents = contents,
+};

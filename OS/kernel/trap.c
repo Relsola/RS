@@ -2,13 +2,14 @@
 #include "paging.h"
 #include "platform.h"
 #include "user/abi.h"
+#include "user_files.h"
 
 enum {
     TIMER_PERIOD = 32768,
     STATUS_SPIE = 1 << 5,
     STATUS_SPP = 1 << 8,
     U_ECALL = 8,
-    REG_A0 = 10, REG_A1 = 11, REG_A7 = 17,
+    REG_A0 = 10, REG_A1 = 11, REG_A2 = 12, REG_A7 = 17,
 };
 
 /* 这台板有一个 hart，仅在 S 中断关闭时写入。shell 和系统调用可在其余时间读取。 */
@@ -95,6 +96,7 @@ void run_tasks(TaskDemo demo)
         [TASKS_YIELD]   = {RS_USER_YIELD_A, RS_USER_YIELD_B},
         [TASKS_PREEMPT] = {RS_USER_PREEMPT_A, RS_USER_PREEMPT_B},
         [TASKS_FAULT]   = {RS_USER_FAULT_A, RS_USER_SURVIVE_B},
+        [TASKS_MEMORY]  = {RS_USER_MEMORY_A, RS_USER_MEMORY_B},
     };
     running_pair = true;
     time_sliced = demo == TASKS_PREEMPT;
@@ -153,6 +155,14 @@ static const char *task_label(void)
     return current == 0 ? "task A" : "task B";
 }
 
+static TrapFrame *finish_task(void)
+{
+    user_files_release(current);
+    user_release(current);
+    tasks[current].runnable = false;
+    return schedule(nullptr, 0);
+}
+
 static uint64_t sys_write(uintptr_t address, uint64_t length)
 {
     uint8_t text[256];
@@ -194,6 +204,9 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
         handle_trap(cause, frame->epc, value);
     }
     if (cause != U_ECALL) {
+        if (user_page_fault(current, value, cause)) {
+            return frame; /* 补页成功，从原 sepc 重试产生缺页的指令。 */
+        }
         uart_puts(task_label());
         uart_puts(" fault: cause=");
         uart_put_u64(cause);
@@ -202,8 +215,7 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
         uart_puts(" tval=");
         uart_put_hex(value);
         uart_puts("\n");
-        tasks[current].runnable = false;
-        return schedule(nullptr, 0);
+        return finish_task();
     }
 
     /* ECALL 是 32 位指令；保存的 EPC 指向 ECALL 本身。 */
@@ -215,6 +227,22 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
     case RS_SYS_TICKS:
         frame->x[REG_A0] = timer_ticks();
         break;
+    case RS_SYS_OPEN:
+        frame->x[REG_A0] = (uint64_t)user_file_open(current, frame->x[REG_A0], frame->x[REG_A1]);
+        break;
+    case RS_SYS_READ:
+        frame->x[REG_A0] = (uint64_t)user_file_read(current, frame->x[REG_A0],
+                                                   frame->x[REG_A1], frame->x[REG_A2]);
+        break;
+    case RS_SYS_CLOSE:
+        frame->x[REG_A0] = (uint64_t)user_file_close(current, frame->x[REG_A0]);
+        break;
+    case RS_SYS_MAP:
+        frame->x[REG_A0] = user_map(current, frame->x[REG_A0]);
+        break;
+    case RS_SYS_UNMAP:
+        frame->x[REG_A0] = user_unmap(current, frame->x[REG_A0]) ? 0 : UINT64_MAX;
+        break;
     case RS_SYS_YIELD:
         frame->x[REG_A0] = 0;
         return schedule("yield", frame->epc - 4);
@@ -223,8 +251,7 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
         uart_puts(" exit: ");
         uart_put_u64(frame->x[REG_A0]);
         uart_puts("\n");
-        tasks[current].runnable = false;
-        return schedule(nullptr, 0);
+        return finish_task();
     default:
         frame->x[REG_A0] = UINT64_MAX;
         break;

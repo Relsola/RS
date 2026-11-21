@@ -73,3 +73,9 @@ install_page_table:
     sfence.vma zero, zero
     csrr a0, satp
     ret
+
+    .section .text.invalidate_user_page, "ax"
+    .globl invalidate_user_page
+invalidate_user_page:
+    sfence.vma a0, zero
+    ret

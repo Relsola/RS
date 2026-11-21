@@ -4,7 +4,7 @@ import subprocess
 from serial_session import command_output
 
 
-TASK_COMMANDS = b"tasks yield\ntasks preempt\ntasks fault\n"
+TASK_COMMANDS = b"tasks yield\ntasks preempt\ntasks fault\ntasks memory\n"
 
 
 def require_order(body, *expected):
@@ -49,3 +49,7 @@ def check_task_session(serial, elf):
     if not fault:
         raise AssertionError(f"missing task A load page fault on UART: {faulted!r}")
     require_order(faulted, fault[0], b"task B survived", b"task B exit: 0")
+
+    memory = command_output(serial, b"tasks memory")
+    require_order(memory, b"task A va=0x0000000040040000 fd=3 value=17 next=o", b"task A exit: 0",
+                  b"task B va=0x0000000040040000 fd=3 value=29 next=_", b"task B exit: 0")

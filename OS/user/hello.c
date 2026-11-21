@@ -1,9 +1,6 @@
-#include <stddef.h>
-#include <stdint.h>
+#include "user/api.h"
 
-long user_write(const void *buffer, size_t length);
 unsigned selected_byte(const char *address, unsigned include);
-[[noreturn]] void user_exit(unsigned status);
 
 static char message[] = "Hello from disk ELF\n";
 static volatile uint32_t starts;

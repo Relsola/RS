@@ -9,7 +9,8 @@
 | `kernel.elf` | 同一目标，另外启用 A 原子指令和 C 压缩指令，LP64 | freestanding C23，使用自编入口、串口和内核函数 |
 | `user.elf` | RV64IMAC，LP64，入口在用户虚拟地址 `0x40000000` | 两个任务执行同一用户镜像。代码和常量嵌入内核的只读页，内核分别分配并清零各任务的栈和数据页 |
 | `hello.elf` | RV64IMAC + Zba、Zbb、Zcb、Zicond，LP64，用户装载区从 `0x40010000` 开始 | C23 程序与汇编辅助函数静态链接为 ELF64，可执行段和可写段分别记录在程序头中，整份 ELF 作为文件写入 RSFS |
-| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 制盘工具写入启动头、内核、RSFS 目录、`readme.txt` 和 `hello.elf` |
+| `memory.elf` | RV64IMAC，LP64，与 `hello.elf` 使用同一用户装载区 | 独立的 C23 程序，调用 `open/read/close` 和 `map/unmap`，观察匿名页的按需分配与跨页读文件 |
+| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 写入启动头、内核、RSFS 目录、`readme.txt`、`hello.elf` 和 `memory.elf` |
 
 在两端之间传输数据时，磁盘头、描述符和寄存器都有显式位宽与小端格式。来宾的汇编文件实现启动、特权切换、陷阱现场和系统调用入口。宿主键盘和终端的系统差异集中在 `console.cpp` 的平台条件分支。[宿主配置](../CMakeLists.txt) · [来宾配置](../OS/CMakeLists.txt) · [平台终端](../VM/console.cpp)
 
@@ -22,7 +23,7 @@ Windows 入口通过 Visual Studio 安装器的 `vswhere` 定位 x64 C++ 工具�
 .\build\debug\bin\rs-vm.exe --firmware .\build\debug\images\firmware.bin --disk .\build\debug\images\disk.img
 ```
 
-Debug 和 Release 分别写入 `build/debug` 和 `build/release`。每套配置的 `bin/` 保存宿主可执行文件，`images/` 保存来宾 ELF、裸镜像和最终启动盘。四个 ELF 都保留符号，固件、内核和内置演示另生成 BIN。磁盘程序直接使用 ELF 的入口和装载信息。来宾在两种配置下均以 `-Os -g` 构建，便于读反汇编和复现磁盘格式。
+Debug 和 Release 分别写入 `build/debug` 和 `build/release`。每套配置的 `bin/` 保存宿主可执行文件，`images/` 保存带符号的来宾 ELF、裸镜像和最终启动盘。固件、内核和内置演示另生成 BIN。磁盘程序直接使用 ELF 的入口和装载信息。来宾在两种配置下均以 `-Os -g` 构建，便于读反汇编和复现磁盘格式。
 
 可以单独替换盘上的文件。例如以下命令使用现有 Debug 内核另建一张盘。用上例的 VM 启动命令把 `--disk` 参数改成 `build/debug/images/alternate.img`，然后在 `rs>` 输入 `ls` 和 `run hello.elf`。制盘工具把每个 `--file` 的等号左侧作为来宾文件名，右侧作为本机输入路径。[制盘工具](../tools/mkdisk.py) · [磁盘文件与程序装载](disk-programs.md)
 
@@ -39,7 +40,8 @@ python tools/mkdisk.py build/debug/images/kernel.bin build/debug/images/alternat
 | `boot.console` | 用真固件和真磁盘启动。检查命令结果、CRLF、退格、错误命令、超长行恢复及关机 |
 | `boot.user` | 在同一次启动中运行两次用户程序，中间触发一次受保护设备读取故障。核对定时器计数前进、正常退出和 shell 恢复 |
 | `boot.tasks` | 观察双方主动让出和同地址私有数据，验证定时器打断纯计算、恢复后的校验值及单任务故障后的运行顺序。用 PATH 中的 `llvm-nm` 读取本次 `user.elf` 的循环边界 |
-| `boot.files` | 从标准盘列出目录，读取文本，运行 `hello.elf`，检查用文本启动和查找不存在文件时的诊断 |
+| `boot.files` | 通过 VFS 列出磁盘根目录和 `/proc`，解析含 `.`、`..` 的路径，运行两个磁盘 ELF，检查文件与目录混用时的诊断 |
+| `disk.vfs_vm` | 在标准盘和替换盘运行真实用户程序，检查按需补页、按打开时间生成的内存快照、跨页读取、页池耗尽和任务回收 |
 | `disk.rsfs` | 用不同磁盘检查目录 CRC、重名、相交、容量越界、截断和旧盘兼容。另损坏一个文件并确认同盘其他文件可读 |
 | `disk.elf` | 给同一内核换一张盘，观察新程序以 37 退出、向只读代码写入时触发页故障，以及多种无效 ELF 被拒绝。重复装载同一程序还会检查数据和 BSS 是否恢复初值 |
 | `boot.ring-wrap` | 为内核载荷附加内容不同的扇区，让 8 项 virtqueue 重用槽位，核对整段 CRC 并启动 |

@@ -6,6 +6,11 @@
 #define RS_SYS_TICKS 2
 #define RS_SYS_EXIT  3
 #define RS_SYS_YIELD 4
+#define RS_SYS_OPEN  5
+#define RS_SYS_READ  6
+#define RS_SYS_CLOSE 7
+#define RS_SYS_MAP   8
+#define RS_SYS_UNMAP 9
 
 /* 进入 user_main 时，a0 选择这次运行的用户入口行为。 */
 #define RS_USER_HELLO     0
@@ -16,5 +21,7 @@
 #define RS_USER_PREEMPT_B 5
 #define RS_USER_FAULT_A   6
 #define RS_USER_SURVIVE_B 7
+#define RS_USER_MEMORY_A  8
+#define RS_USER_MEMORY_B  9
 
 #endif

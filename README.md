@@ -27,14 +27,17 @@ System halted.
 
 | 在 `rs>` 输入 | 可以观察什么 |
 | --- | --- |
-| `ls`、`cat readme.txt` | 列出只读磁盘上的文件和字节数，按文件名从块设备读取内容 |
+| `ls /`、`cat /readme.txt` | 通过虚拟文件系统列出根目录，读取只读磁盘上的文件 |
+| `cat /proc/meminfo` | 打开一个由内核即时生成的文件，查看匿名页预留数、实际驻留数和累计处理的用户缺页数 |
 | `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
+| `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
 | `ticks` | 查看内核实际处理过的监管定时器中断次数 |
 | `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
 | `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
 | `tasks yield` | A、B 主动交出 CPU。它们使用同一虚拟地址，切换后各自读回 11 和 22 |
 | `tasks preempt` | A 进行纯计算时被时钟中断，B 先完成，A 恢复后输出校验值 `0x0ed55926` |
 | `tasks fault` | A 读取受保护的串口页后终止，B 仍能完成并回到 shell |
+| `tasks memory` | 两个任务各自持有匿名页和文件描述符 3。切换后，各自读回原来的字节和文件位置 |
 
 | Windows 入口 | 作用 |
 | --- | --- |
@@ -55,4 +58,6 @@ System halted.
 6. [原子指令与保留集](docs/atomics.md)解释 LR/SC、设备写入与任务切换之间的关系。
 7. [从磁盘文件到用户指令](docs/disk-programs.md)跟踪 `run hello.elf`，包含给磁盘添加文件和替换程序的步骤。
 8. [从反汇编看 Zcb 和 Zicond](docs/compact-integer.md)解释上述程序实际执行的压缩访存和条件清零指令。
-9. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+9. [虚拟文件系统](docs/vfs.md)解释磁盘文件和内核生成的 `/proc/meminfo` 如何共用路径、打开、读取接口。
+10. [匿名虚拟内存](docs/virtual-memory.md)追踪预留地址、按需分配物理页、重试指令与释放映射。
+11. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

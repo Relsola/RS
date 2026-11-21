@@ -1,15 +1,9 @@
 #include "user/abi.h"
+#include "user/api.h"
 #include "user/layout.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
-long user_write(const void *buffer, size_t length);
-uint64_t user_ticks(void);
-void user_yield(void);
 unsigned user_yield_reserved(volatile uint32_t *word);
 uint32_t user_checksum(void);
-[[noreturn]] void user_exit(unsigned status);
 
 /* 每个实例在同一虚拟地址读写这些 .bss 对象。volatile 强制切换后重新读取。 */
 static volatile uint32_t private_value;
@@ -83,18 +77,60 @@ static unsigned yield_demo(bool task_b)
     return 0;
 }
 
+static void write_hex(uintptr_t value, unsigned width)
+{
+    static const char digits[] = "0123456789abcdef";
+    char hex[sizeof(value) * 2];
+    for (unsigned i = width; i > 0; --i) {
+        hex[i - 1] = digits[value & 15];
+        value >>= 4;
+    }
+    write_bytes(hex, width);
+}
+
 static unsigned preempt_demo(void)
 {
     uint32_t result = user_checksum();
-    static const char digits[] = "0123456789abcdef";
-    char hex[9];
-    for (unsigned i = 0; i < 8; ++i) {
-        hex[i] = digits[(result >> (28 - 4 * i)) & 15];
-    }
-    hex[8] = '\n';
     write_text("task A checksum: 0x");
-    write_bytes(hex, sizeof(hex));
+    write_hex(result, 8);
+    write_text("\n");
     return result == UINT32_C(0x0ed55926) ? 0 : 7;
+}
+
+static unsigned memory_demo(bool task_b)
+{
+    static const char path[] = "/proc/meminfo";
+    volatile unsigned char *page = user_map(1);
+    long fd = user_open(path, sizeof(path) - 1);
+    if (!page || fd != 3 || *page != 0) {
+        return 10;
+    }
+    *page = task_b ? 29 : 17;
+    char prefix[4];
+    size_t count = task_b ? 4 : 1;
+    if (user_read(fd, prefix, count) != (long)count || prefix[0] != 'p') {
+        return 11;
+    }
+    user_yield();
+    char next = 0;
+    unsigned observed = *page;
+    if (user_read(fd, &next, 1) != 1 || next != (task_b ? '_' : 'o') ||
+        observed != (task_b ? 29u : 17u)) {
+        return 12;
+    }
+    write_text(task_b ? "task B va=0x" : "task A va=0x");
+    write_hex((uintptr_t)page, sizeof(uintptr_t) * 2);
+    write_text(" fd=");
+    char descriptor = (char)('0' + fd);
+    write_bytes(&descriptor, 1);
+    write_text(" value=");
+    char value[] = {(char)('0' + observed / 10), (char)('0' + observed % 10)};
+    write_bytes(value, sizeof(value));
+    write_text(" next=");
+    write_bytes(&next, 1);
+    write_text("\n");
+    /* 让 exit 同时回收本任务的匿名页与描述符，另一任务将继续使用自己的。 */
+    return 0;
 }
 
 /* 内核以 sret 进入这里。sp 指向本任务的私有栈，a0 选择同一份代码的执行路径。 */
@@ -110,6 +146,8 @@ static unsigned preempt_demo(void)
     case RS_USER_PREEMPT_A: status = preempt_demo(); break;
     case RS_USER_PREEMPT_B: write_text("task B ran\n"); break;
     case RS_USER_SURVIVE_B: write_text("task B survived\n"); break;
+    case RS_USER_MEMORY_A:
+    case RS_USER_MEMORY_B: status = memory_demo(mode == RS_USER_MEMORY_B); break;
     default: status = 8; break;
     }
     user_exit(status);

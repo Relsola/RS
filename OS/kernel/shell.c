@@ -1,5 +1,5 @@
 #include "platform.h"
-#include "fs.h"
+#include "vfs.h"
 #include "paging.h"
 #include "trap.h"
 
@@ -19,28 +19,50 @@ static bool is_space(char ch)
     return ch == ' ' || ch == '\t';
 }
 
-static const char *mount_error;
-
 static const char *list_files(const char *argument)
 {
-    if (*argument) {
-        return "usage: ls";
+    VfsDir directory;
+    const char *error = vfs_opendir(*argument ? argument : "/", &directory);
+    if (error) {
+        return error;
     }
-    for (unsigned i = 0; i < fs_count(); ++i) {
-        const FsFile *file = fs_at(i);
-        uart_puts(file->name);
-        uart_puts("  ");
-        uart_put_u64(file->size);
-        uart_puts(" bytes\n");
+    VfsEntry entry;
+    while (vfs_readdir(&directory, &entry)) {
+        uart_puts(entry.name);
+        if (entry.directory) {
+            uart_puts("/");
+        } else if (entry.size != SIZE_MAX) {
+            uart_puts("  ");
+            uart_put_u64(entry.size);
+            uart_puts(" bytes");
+        }
+        uart_puts("\n");
     }
     return nullptr;
 }
 
+static const char *print_file(VfsFile *file)
+{
+    uint8_t chunk[128];
+    uint8_t previous = 0;
+    for (;;) {
+        size_t size;
+        const char *error = vfs_read(file, chunk, sizeof(chunk), &size);
+        if (error || !size) {
+            return error;
+        }
+        for (size_t i = 0; i < size; ++i) {
+            if (chunk[i] == '\n' && previous != '\r') {
+                uart_putc('\r');
+            }
+            uart_putc((char)chunk[i]);
+            previous = chunk[i];
+        }
+    }
+}
+
 static const char *file_command(const char *command, const char *name)
 {
-    if (mount_error) {
-        return mount_error;
-    }
     if (equal(command, "ls")) {
         return list_files(name);
     }
@@ -48,25 +70,17 @@ static const char *file_command(const char *command, const char *name)
     if (!*name) {
         return run ? "usage: run NAME" : "usage: cat NAME";
     }
-    const FsFile *file = fs_find(name);
-    if (!file) {
-        return "file not found";
-    }
-    const uint8_t *bytes = nullptr;
-    const char *error = fs_load(file, &bytes);
+    VfsFile file;
+    const char *error = vfs_open(name, &file);
     if (error) {
         return error;
     }
-    if (run) {
-        return run_elf(bytes, file->size);
+    if (!run) {
+        return print_file(&file);
     }
-    for (size_t i = 0; i < file->size; ++i) {
-        if (bytes[i] == '\n' && (i == 0 || bytes[i - 1] != '\r')) {
-            uart_putc('\r');
-        }
-        uart_putc((char)bytes[i]);
-    }
-    return nullptr;
+    const uint8_t *bytes;
+    error = vfs_contents(&file, &bytes);
+    return error ? error : run_elf(bytes, file.size);
 }
 
 static void execute(char *line)
@@ -91,13 +105,13 @@ static void execute(char *line)
         uart_puts("help        list commands\n"
                   "echo TEXT   print TEXT\n"
                   "info        show boot and console details\n"
-                  "ls          list disk files and sizes\n"
-                  "cat NAME    print a disk file\n"
-                  "run NAME    load and execute a disk ELF\n"
+                  "ls [PATH]   list a directory\n"
+                  "cat PATH    print a file\n"
+                  "run PATH    load and execute an ELF\n"
                   "ticks       show timer interrupt count\n"
                   "user        run the user-mode program\n"
                   "user fault  demonstrate user-mode memory protection\n"
-                  "tasks MODE  run two tasks: yield, preempt, or fault\n"
+                  "tasks MODE  run two tasks: yield, preempt, fault, or memory\n"
                   "halt        shut down the machine\n");
     } else if (equal(line, "echo")) {
         uart_puts(argument);
@@ -129,8 +143,10 @@ static void execute(char *line)
             run_tasks(TASKS_PREEMPT);
         } else if (equal(argument, "fault")) {
             run_tasks(TASKS_FAULT);
+        } else if (equal(argument, "memory")) {
+            run_tasks(TASKS_MEMORY);
         } else {
-            uart_puts("usage: tasks yield|preempt|fault\n");
+            uart_puts("usage: tasks yield|preempt|fault|memory\n");
         }
     } else if (equal(line, "halt")) {
         uart_puts("System halted.\n");
@@ -152,7 +168,7 @@ static void execute(char *line)
         uart_puts("kernel error: Sv39 unavailable\n");
         poweroff(true);
     }
-    mount_error = fs_mount();
+    vfs_mount();
     timer_start();
     uart_puts("RS OS ready. Type help.\nrs> ");
     for (;;) {

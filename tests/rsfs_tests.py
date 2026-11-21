@@ -45,6 +45,7 @@ def main():
 
         invalid = [(b"ls", b"ls: invalid directory\n"),
                    (b"cat readme.txt", b"cat: invalid directory\n"),
+                   (b"ls /proc", b"meminfo\n"),
                    (b"echo alive", b"alive\n")]
         image = bytearray(original)
         image[directory + 8] ^= 1
@@ -66,9 +67,21 @@ def main():
         boot("missing directory", original[:directory], invalid)
         old_disk = bytearray(original[:directory])
         old_disk[16:24] = bytes(8)
-        boot("kernel-only disk", old_disk, [(b"ls", b""),
+        boot("kernel-only disk", old_disk, [(b"ls", b"proc/\n"),
                                             (b"cat readme.txt", b"cat: file not found\n"),
                                             (b"echo alive", b"alive\n")])
+
+        # A mount point takes precedence over a disk entry with the same name.
+        # Keep the directory valid so the VFS must resolve the collision.
+        image = bytearray(original)
+        image[text_record:text_record + 20] = b"proc".ljust(20, b"\0")
+        crc = zlib.crc32(image[directory + 12:directory + sector])
+        struct.pack_into("<I", image, directory + 8, crc)
+        listing = b"".join(name + f"  {size} bytes\n".encode()
+                           for name, (_, _, size) in entries.items() if name != b"readme.txt")
+        boot("mount hides disk entry", image, [(b"ls", listing + b"proc/\n"),
+                                               (b"ls /proc", b"meminfo\n"),
+                                               (b"cat /proc", b"cat: is a directory\n")])
 
         image = bytearray(original)
         image[elf_lba * sector] ^= 1
