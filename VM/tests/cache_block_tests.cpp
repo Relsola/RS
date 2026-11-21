@@ -7,6 +7,7 @@
 
 static constexpr uint64_t CODE = RAM_BASE, DATA = RAM_BASE + 0x5000;
 static constexpr uint32_t CBO_ZERO_X1 = 0x0040a00f;
+static constexpr uint32_t CBO_INVAL_X1 = 0x0000a00f, CBO_CLEAN_X1 = 0x0010a00f, CBO_FLUSH_X1 = 0x0020a00f;
 
 static void check(bool ok, const char *message)
 {
@@ -112,6 +113,48 @@ static void test_enable(Bus *bus)
     }
 }
 
+static void test_management(Bus *bus)
+{
+    uint8_t *bytes = ram_bytes(bus, DATA, 64);
+    std::fill_n(bytes, 64, 0x35);
+    for (uint32_t op : {CBO_INVAL_X1, CBO_CLEAN_X1, CBO_FLUSH_X1}) {
+        // 00/01/11 只控制 INVAL，CBCFE 单独控制 CLEAN/FLUSH。
+        for (Privilege mode : {MACHINE, SUPERVISOR, USER}) {
+            for (uint64_t machine : {0u, 0x10u, 0x30u, 0x40u}) {
+                for (uint64_t supervisor : {0u, 0x10u, 0x30u, 0x40u}) {
+                    Cpu cpu = enabled(mode);
+                    cpu.menvcfg = machine;
+                    cpu.senvcfg = supervisor;
+                    uint64_t mask = op == CBO_INVAL_X1 ? 0x30 : 0x40;
+                    bool allowed = (mode == MACHINE || (machine & mask)) &&
+                                   (mode != USER || (supervisor & mask));
+                    cpu.x[1] = allowed ? DATA + 63 : UINT64_MAX;
+                    step(&cpu, bus, op);
+                    check(allowed ? !cpu.trapped && cpu.minstret == 1 :
+                          cpu.trapped && cpu.mcause == ILLEGAL_INSTRUCTION && cpu.mtval == op &&
+                          cpu.minstret == 0, "gate instruction before address translation");
+                }
+            }
+        }
+
+        Cpu cpu = enabled(MACHINE);
+        bus->block.status = 15;
+        bus->block.interrupts = 1;
+        cpu.x[1] = VIRTIO_BASE + 0x53; // Contains QUEUE_NOTIFY. A management op never notifies.
+        step(&cpu, bus, op);
+        check(!cpu.trapped && bus->block.status == 15 && bus->block.interrupts == 1,
+              "management on MMIO preserves device status and pending interrupt");
+        for (uint64_t address : {UART_BASE + 7, RESET_PC, FINISHER_BASE, DATA + 4096}) {
+            cpu.x[1] = address;
+            step(&cpu, bus, op);
+            check(cpu.trapped && cpu.mcause == STORE_FAULT && cpu.mtval == address,
+                  "missing full physical block reports a store access fault");
+        }
+    }
+    check(std::all_of(bytes, bytes + 64, [](auto b) { return b == 0x35; }),
+          "management preserves RAM bytes");
+}
+
 static void test_translation(Bus *bus)
 {
     constexpr uint64_t root = RAM_BASE + 0x1000, middle = root + 4096, leaves = middle + 4096;
@@ -136,6 +179,40 @@ static void test_translation(Bus *bus)
     step(&cpu, bus, CBO_ZERO_X1);
     check(!cpu.trapped && std::all_of(bytes, bytes + 64, [](auto b) { return b == 0; }),
           "MPRV applies to translation, current M privilege controls CBZE");
+
+    struct PageCase { unsigned flags; bool mxr, allowed; };
+    constexpr PageCase pages[] = {
+        {0x53, false, true}, {0x57, false, true}, // U/R or U/RW, A=1 and D=0.
+        {0x59, false, false}, {0x59, true, true}, // Execute-only, MXR determines readability.
+        {0x13, false, false}, {0x43, false, false}, {0, false, false}, // No A, no U, no PTE.
+    };
+    cpu.pmpcfg[0] = 0x09; // Read-only PMP covers page tables and the final physical block.
+    for (uint32_t op : {CBO_INVAL_X1, CBO_CLEAN_X1, CBO_FLUSH_X1}) {
+        for (const auto &page : pages) {
+            uint64_t pte = (DATA >> 2) | page.flags;
+            check(bus_store(bus, leaves, 8, pte), "install management leaf");
+            cpu.mstatus = MPRV | (page.mxr ? MXR : 0);
+            step(&cpu, bus, op);
+            check(page.allowed ? !cpu.trapped : cpu.trapped && cpu.mcause == STORE_PAGE_FAULT &&
+                  cpu.mtval == va + 255 && cpu.mepc == CODE, "management tests read access and A");
+            uint64_t after = 0;
+            check(bus_load(bus, leaves, 8, &after) && after == pte, "management never sets D");
+        }
+    }
+    check(bus_store(bus, leaves, 8, (DATA >> 2) | 0x53), "restore readable mapping");
+    constexpr uint64_t supervisor_data = MPRV | (uint64_t{SUPERVISOR} << 11);
+    cpu.mstatus = supervisor_data;
+    step(&cpu, bus, CBO_CLEAN_X1);
+    check(cpu.trapped && cpu.mcause == STORE_PAGE_FAULT && cpu.mtval == va + 255,
+          "supervisor management of a user page requires SUM");
+    cpu.mstatus = supervisor_data | SUM;
+    step(&cpu, bus, CBO_CLEAN_X1);
+    check(!cpu.trapped, "SUM allows management of a readable user page");
+    cpu.pmpaddr[0] = (DATA + 224) >> 2; // Split the selected physical block at its midpoint.
+    cpu.mstatus = MPRV;
+    step(&cpu, bus, CBO_CLEAN_X1);
+    check(cpu.trapped && cpu.mcause == STORE_FAULT && cpu.mtval == va + 255,
+          "management checks the whole PMP range and keeps the virtual operand");
 }
 
 int main()
@@ -144,6 +221,7 @@ int main()
     bus.ram.resize(0x6000);
     test_blocks(&bus);
     test_enable(&bus);
+    test_management(&bus);
     test_translation(&bus);
     std::puts("Cache block tests passed");
 }

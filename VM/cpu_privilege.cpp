@@ -149,6 +149,15 @@ static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
     return true;
 }
 
+static uint64_t cache_envcfg(uint64_t value)
+{
+    uint64_t fields = value & (CBIE_MASK | CBCFE | CBZE);
+    if ((fields & CBIE_MASK) == (2u << 4)) {
+        fields &= ~CBIE_MASK; // CBIE=10 为保留值。本机写入该值后读回 00。
+    }
+    return fields;
+}
+
 static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
 {
     if (csr >= 0x30c && csr <= 0x30f) {
@@ -186,7 +195,7 @@ static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
     case 0x104: cpu->mie = (cpu->mie & ~cpu->mideleg) | (value & cpu->mideleg); break;
     case 0x105: cpu->stvec = value & ~uint64_t{3}; break;
     case 0x106: cpu->scounteren = value & 7; break;
-    case 0x10a: cpu->senvcfg = value & CBZE; break;
+    case 0x10a: cpu->senvcfg = cache_envcfg(value); break;
     case 0x140: cpu->sscratch = value; break;
     case 0x141: cpu->sepc = value & ~uint64_t{1}; break;
     case 0x142: cpu->scause = value; break;
@@ -211,7 +220,7 @@ static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
     case 0x304: cpu->mie = value & STI; break;
     case 0x305: cpu->mtvec = value & ~uint64_t{3}; break;
     case 0x306: cpu->mcounteren = value & 7; break;
-    case 0x30a: cpu->menvcfg = value & (STCE | CBZE); break;
+    case 0x30a: cpu->menvcfg = (value & STCE) | cache_envcfg(value); break;
     case 0x340: cpu->mscratch = value; break;
     case 0x341: cpu->mepc = value & ~uint64_t{1}; break;
     case 0x342: cpu->mcause = value; break;

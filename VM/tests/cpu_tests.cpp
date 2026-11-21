@@ -22,6 +22,11 @@ bool bus_is_ram(const Bus *bus, uint64_t address, unsigned width)
     return address <= bus->ram.size() - width;
 }
 
+bool bus_can_manage_block(const Bus *bus, uint64_t address, unsigned width)
+{
+    return bus_is_ram(bus, address, width);
+}
+
 bool bus_load(Bus *bus, uint64_t address, unsigned width, uint64_t *value)
 {
     if (address > bus->ram.size() - width) {
@@ -404,16 +409,16 @@ static uint64_t read_csr(Cpu *cpu, Bus *bus, unsigned csr)
 static void test_state_enable()
 {
     constexpr uint64_t envcfg = uint64_t{1} << 62, se = uint64_t{1} << 63;
-    constexpr uint64_t cbze = 1u << 7;
+    constexpr uint64_t cbo_fields = 0xf0;
     Bus bus{};
     Cpu cpu{};
     cpu.pmpcfg[0] = 0x0f;
     cpu.pmpaddr[0] = bus.ram.size() >> 2;
     write_csr(&cpu, &bus, 0x10a, UINT64_MAX);
-    check(read_csr(&cpu, &bus, 0x10a) == cbze, "M accesses senvcfg while ENVCFG is closed");
+    check(read_csr(&cpu, &bus, 0x10a) == cbo_fields, "M accesses senvcfg while ENVCFG is closed");
     cpu.privilege = SUPERVISOR;
     write_csr(&cpu, &bus, 0x10a, 0);
-    check(cpu.trapped && cpu.mcause == 2 && cpu.senvcfg == cbze, "ENVCFG denies S write");
+    check(cpu.trapped && cpu.mcause == 2 && cpu.senvcfg == cbo_fields, "ENVCFG denies S write");
 
     for (unsigned i = 0; i < 4; ++i) {
         unsigned machine = 0x30c + i, supervisor = 0x10c + i;
@@ -437,6 +442,15 @@ static void test_state_enable()
     cpu.privilege = USER;
     write_csr(&cpu, &bus, 0x10a, UINT64_MAX);
     check(cpu.trapped && cpu.mcause == 2 && cpu.senvcfg == 0, "U still cannot write a supervisor CSR");
+
+    for (unsigned csr : {0x30au, 0x10au}) {
+        for (unsigned cbie = 0; cbie < 4; ++cbie) {
+            uint64_t fields = (cbie << 4) | 0xc0;
+            write_csr(&cpu, &bus, csr, fields);
+            check(read_csr(&cpu, &bus, csr) == (cbie == 2 ? 0xc0u : fields),
+                  "CBIE accepts 00/01/11 and clears reserved 10 independently of CBCFE/CBZE");
+        }
+    }
 }
 
 static void test_timer_csrs()
@@ -455,7 +469,7 @@ static void test_timer_csrs()
     check(read_csr(&cpu, &bus, 0x144) == sti, "sip.STIP is always read-only");
     write_csr(&cpu, &bus, 0x344, 0);
     write_csr(&cpu, &bus, 0x30a, UINT64_MAX);
-    check(read_csr(&cpu, &bus, 0x30a) == (stce | (1u << 7)), "menvcfg implements STCE and CBZE");
+    check(read_csr(&cpu, &bus, 0x30a) == (stce | 0xf0), "menvcfg implements STCE and CBO fields");
     write_csr(&cpu, &bus, 0x344, sti);
     check(read_csr(&cpu, &bus, 0x344) == 0, "mip cannot force a future Sstc deadline");
     write_csr(&cpu, &bus, 0x14d, 0);

@@ -21,6 +21,14 @@ bool bus_is_ram(const Bus *bus, uint64_t address, unsigned width)
     return in_ram(bus, address, width);
 }
 
+bool bus_can_manage_block(const Bus *bus, uint64_t address, unsigned width)
+{
+    // 每个 virtio 插槽整页可读。ROM、UART 和关机寄存器都占不满一个块。
+    return in_ram(bus, address, width) ||
+           (address >= VIRTIO_BASE && width <= VIRTIO_WINDOW_BYTES &&
+            address - VIRTIO_BASE <= VIRTIO_WINDOW_BYTES - width);
+}
+
 Reservation *bus_reservation(Bus *bus)
 {
     return &bus->reservation;
@@ -106,7 +114,7 @@ bool bus_load(Bus *bus, uint64_t address, unsigned width, uint64_t *value)
         *value = read_le(RESET_ROM + (address - RESET_PC), width);
     } else if (address >= UART_BASE && address < UART_BASE + 8 && width == 1) {
         *value = uart_read(bus, static_cast<unsigned>(address - UART_BASE));
-    } else if (address >= VIRTIO_BASE && address < VIRTIO_BASE + 0x8000 &&
+    } else if (address >= VIRTIO_BASE && address < VIRTIO_BASE + VIRTIO_WINDOW_BYTES &&
                width == 4 && (address & 3) == 0) {
         uint32_t offset = static_cast<uint32_t>(address - VIRTIO_BASE);
         if (offset < 0x1000) {

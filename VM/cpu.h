@@ -8,6 +8,7 @@ struct Bus;
 bool bus_load(Bus *bus, uint64_t address, unsigned width, uint64_t *value);
 bool bus_store(Bus *bus, uint64_t address, unsigned width, uint64_t value);
 bool bus_is_ram(const Bus *bus, uint64_t address, unsigned width);
+bool bus_can_manage_block(const Bus *bus, uint64_t address, unsigned width);
 
 enum Privilege : unsigned { USER = 0, SUPERVISOR = 1, MACHINE = 3 };
 

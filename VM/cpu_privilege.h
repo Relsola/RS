@@ -15,14 +15,14 @@ constexpr uint64_t SPP = 1u << 8, MPP = 3u << 11, MPRV = 1u << 17;
 constexpr uint64_t SUM = 1u << 18, MXR = 1u << 19;
 constexpr uint64_t TVM = 1u << 20, TW = 1u << 21, TSR = 1u << 22;
 constexpr uint64_t PPN_MASK = (uint64_t{1} << 44) - 1;
-constexpr uint64_t CBZE = 1u << 7; // menvcfg/senvcfg 中的 CBO.ZERO 许可位。
+constexpr uint64_t CBIE_FLUSH = 1u << 4, CBIE_MASK = 3u << 4, CBCFE = 1u << 6, CBZE = 1u << 7;
 
-enum class Access { Fetch, Load, Store, Amo, ZeroBlock };
+enum class Access { Fetch, Load, Store, Amo, ZeroBlock, ManageBlock };
 
 void cpu_trap(Cpu *cpu, TrapCause cause, uint64_t value);
 bool cpu_take_timer_interrupt(Cpu *cpu);
 bool cpu_system(Cpu *cpu, uint32_t insn, uint64_t *next_pc, uint64_t *result, bool *wrote_instret);
 bool cpu_memory(Cpu *cpu, Bus *bus, Access access, uint64_t address, unsigned width, uint64_t *value);
 bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned width, uint64_t *pa);
-bool cpu_zero_block(Cpu *cpu, Bus *bus, uint64_t address);
+bool cpu_cache_block(Cpu *cpu, Bus *bus, unsigned operation, uint64_t address);
 bool cpu_atomic(Cpu *cpu, Bus *bus, uint32_t insn, uint64_t address, uint64_t operand, uint64_t *rd);

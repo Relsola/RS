@@ -13,6 +13,7 @@ inline constexpr uint64_t RAM_BASE = 0x80000000;
 inline constexpr size_t RAM_SIZE = 128 * 1024 * 1024;
 inline constexpr uint64_t UART_BASE = 0x10000000;
 inline constexpr uint64_t VIRTIO_BASE = 0x10001000;
+inline constexpr unsigned VIRTIO_WINDOW_BYTES = 8 * 4096;
 inline constexpr uint64_t FINISHER_BASE = 0x100000;
 
 struct BlockDevice
@@ -40,6 +41,7 @@ struct Bus
 // 返回的区域完全位于 RAM；设备的 DMA 不经过 MMIO 分发。
 uint8_t *ram_bytes(Bus *bus, uint64_t address, size_t size);
 bool bus_is_ram(const Bus *bus, uint64_t address, unsigned width);
+bool bus_can_manage_block(const Bus *bus, uint64_t address, unsigned width);
 uint64_t read_le(const uint8_t *p, unsigned width);
 void write_le(uint8_t *p, unsigned width, uint64_t value);
 bool bus_load(Bus *bus, uint64_t address, unsigned width, uint64_t *value);

@@ -139,8 +139,8 @@ void cpu_step(Cpu *cpu, Bus *bus)
         break;
     case 0x0f: // MISC-MEM
         writes_rd = false;
-        if ((insn & 0xfff07fff) == 0x0040200f) { // CBO.ZERO (rs1), rd=x0
-            legal = cpu_zero_block(cpu, bus, a);
+        if (function == 2 && rd == 0) { // CBO.*, rs1 给出块内地址，funct12 选择操作。
+            legal = cpu_cache_block(cpu, bus, insn >> 20, a);
             if (cpu->trapped) {
                 return;
             }

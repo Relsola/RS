@@ -25,7 +25,8 @@ static bool pmp_allows(const Cpu *cpu, Privilege mode, Access access, uint64_t a
     unsigned permission = 0;
     switch (access) {
     case Access::Fetch: permission = 4; break;
-    case Access::Load:  permission = 1; break;
+    // 管理操作可使用读或写权限。本机 PMP 的合法可写项同时可读。
+    case Access::Load: case Access::ManageBlock: permission = 1; break;
     case Access::Store: case Access::ZeroBlock: permission = 2; break;
     case Access::Amo:   permission = 3; break; // AMO 同时要求读和写。
     }
@@ -115,7 +116,8 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
                 const bool can_read = read || ((cpu->mstatus & MXR) && execute);
                 const bool needs_write = access == Access::Store || access == Access::Amo ||
                                          access == Access::ZeroBlock;
-                if ((access == Access::Fetch && !execute) || (access == Access::Load && !can_read) ||
+                if ((access == Access::Fetch && !execute) ||
+                    ((access == Access::Load || access == Access::ManageBlock) && !can_read) ||
                     (needs_write && (!write || !dirty)) || !accessed) {
                     break; // Svade：缺少 A/D 由软件处理。
                 }
@@ -133,7 +135,7 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
             return false;
         }
     }
-    if (access == Access::ZeroBlock) {
+    if (access == Access::ZeroBlock || access == Access::ManageBlock) {
         // 块不会跨越 4 KiB 页。只对物理范围向下对齐，异常仍报告 rs1 的原始虚拟地址。
         *pa &= ~uint64_t{BLOCK_BYTES - 1};
     }
@@ -144,14 +146,30 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
     return true;
 }
 
-bool cpu_zero_block(Cpu *cpu, Bus *bus, uint64_t address)
+bool cpu_cache_block(Cpu *cpu, Bus *bus, unsigned operation, uint64_t address)
 {
-    if ((cpu->privilege != MACHINE && !(cpu->menvcfg & CBZE)) ||
-        (cpu->privilege == USER && !(cpu->senvcfg & CBZE))) {
+    uint64_t enable;
+    Access access = Access::ManageBlock;
+    switch (operation) {
+    case 0: enable = CBIE_FLUSH; break; // INVAL 在 CBIE=01 和 11 时允许，01 选择 flush。
+    case 1: case 2: enable = CBCFE; break; // CLEAN / FLUSH
+    case 4: enable = CBZE; access = Access::ZeroBlock; break;
+    default: return false;
+    }
+    if ((cpu->privilege != MACHINE && !(cpu->menvcfg & enable)) ||
+        (cpu->privilege == USER && !(cpu->senvcfg & enable))) {
         return false; // 译码器报告非法指令，先于地址翻译。
     }
     uint64_t base;
-    if (!cpu_translate(cpu, bus, Access::ZeroBlock, address, BLOCK_BYTES, &base)) {
+    if (!cpu_translate(cpu, bus, access, address, BLOCK_BYTES, &base)) {
+        return true;
+    }
+    if (access == Access::ManageBlock) {
+        // RAM 与 DMA 共用同一份数据。通过检查即可完成 clean、flush 或 invalidate。
+        // 地址落在 MMIO 时也不能为模拟管理操作而读写设备寄存器。
+        if (!bus_can_manage_block(bus, base, BLOCK_BYTES)) {
+            cpu_trap(cpu, STORE_FAULT, address);
+        }
         return true;
     }
     if (!bus_is_ram(bus, base, BLOCK_BYTES)) {
