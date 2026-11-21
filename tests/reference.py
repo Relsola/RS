@@ -6,6 +6,7 @@ from pathlib import Path
 
 from user_session import COMMANDS, check_user_session
 from task_session import TASK_COMMANDS, check_task_session
+from file_session import FILE_COMMANDS, check_file_session
 
 
 def read_until(connection, serial, marker):
@@ -43,12 +44,13 @@ def main():
             with connection:
                 connection.settimeout(8)
                 read_until(connection, serial, b"rs> ")
-                connection.sendall(b"info\necho hello\n" + TASK_COMMANDS + COMMANDS)
+                connection.sendall(b"info\necho hello\n" + FILE_COMMANDS + TASK_COMMANDS + COMMANDS)
                 read_until(connection, serial, b"System halted.")
             rc = proc.wait(timeout=5)
             expected = (b"kernel verified", b"MMU: Sv39", b"\r\nhello\r\n")
             if rc or not all(fragment in serial for fragment in expected):
                 raise RuntimeError(f"unexpected reference result, exit {rc}")
+            check_file_session(bytes(serial), args.images)
             check_user_session(bytes(serial))
             check_task_session(bytes(serial), args.images / "user.elf")
         except Exception as exc:

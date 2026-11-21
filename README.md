@@ -13,10 +13,12 @@ RS 把一台计算机的两侧放在一个工程里。`VM/` 是用 C 风格 C++2
 首次运行会构建虚拟机、固件和启动盘。下面是一段实际的串口会话。
 
 ```text
-rs> info
-RS OS | RV64 supervisor mode | MMU: Sv39 | boot: virtio-blk | console: 16550 UART
-rs> echo hello
-hello
+rs> cat readme.txt
+Welcome to RS.
+The kernel read this file from the virtual disk.
+rs> run hello.elf
+hello from disk ELF
+user exit: 0
 rs> halt
 System halted.
 ```
@@ -25,6 +27,8 @@ System halted.
 
 | 在 `rs>` 输入 | 可以观察什么 |
 | --- | --- |
+| `ls`、`cat readme.txt` | 列出只读磁盘上的文件和字节数，按文件名从块设备读取内容 |
+| `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
 | `ticks` | 查看内核实际处理过的监管定时器中断次数 |
 | `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
 | `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
@@ -49,4 +53,6 @@ System halted.
 4. [用户程序、系统调用与定时器](docs/user-timer.md)追踪同一个程序进入内核的三条路径，分别对应系统调用、时钟中断和页故障。
 5. [单核上的两个用户任务](docs/tasks.md)从串口输出找到 A 被抢占的那一条指令，再看 B 如何取得自己的寄存器和内存。
 6. [原子指令与保留集](docs/atomics.md)解释 LR/SC、设备写入与任务切换之间的关系。
-7. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+7. [从磁盘文件到用户指令](docs/disk-programs.md)跟踪 `run hello.elf`，包含给磁盘添加文件和替换程序的步骤。
+8. [从反汇编看 Zcb 和 Zicond](docs/compact-integer.md)解释上述程序实际执行的压缩访存和条件清零指令。
+9. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

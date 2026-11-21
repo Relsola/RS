@@ -26,11 +26,17 @@ add_subdirectory(VM)
 add_subdirectory(OS)
 
 if(BUILD_TESTING)
-    foreach(scenario IN ITEMS console user tasks ring-wrap bad-header bad-crc bad-size short-disk)
+    foreach(scenario IN ITEMS console user tasks files ring-wrap bad-header bad-crc bad-size short-disk)
         add_test(NAME boot.${scenario} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/boot.py" ${scenario} "$<TARGET_FILE:rs-vm>"
             "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
         set_tests_properties(boot.${scenario} PROPERTIES TIMEOUT 30)
+    endforeach()
+    foreach(format IN ITEMS rsfs elf)
+        add_test(NAME disk.${format} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/${format}_tests.py" "$<TARGET_FILE:rs-vm>"
+            "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
+        set_tests_properties(disk.${format} PROPERTIES TIMEOUT 90)
     endforeach()
     set(RS_REFERENCE_QEMU "" CACHE FILEPATH "Optional qemu-system-riscv64 with the rva23s64 CPU model")
     if(RS_REFERENCE_QEMU)

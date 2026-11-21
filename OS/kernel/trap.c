@@ -20,6 +20,7 @@ void timer_set_deadline(uint64_t deadline);
 void timer_enable_interrupt(void);
 void enter_tasks(void);
 void discard_lr_reservation(void);
+void sync_user_instructions(void);
 
 typedef struct {
     bool runnable;
@@ -47,27 +48,45 @@ uint64_t timer_ticks(void)
     return tick_count;
 }
 
-static void prepare_task(unsigned slot, unsigned program_mode)
+static void prepare_frame(unsigned slot, uintptr_t entry, unsigned program_mode)
 {
     Task *task = &tasks[slot];
-    user_prepare(slot);
     for (unsigned i = 0; i < 32; ++i) {
         task->frame.x[i] = 0;
     }
     task->frame.x[2] = USER_STACK_TOP;
     task->frame.x[REG_A0] = program_mode;
-    task->frame.epc = USER_ENTRY;
+    task->frame.epc = entry;
     task->frame.status = STATUS_SPIE; /* SPP=U，sret 后恢复 S 级中断使能。 */
     task->runnable = true;
 }
 
-void run_user(bool fault)
+static void enter_single_task(uintptr_t entry, unsigned program_mode)
 {
     running_pair = false;
     time_sliced = false;
-    prepare_task(0, fault ? RS_USER_FAULT : RS_USER_HELLO);
+    prepare_frame(0, entry, program_mode);
     tasks[1].runnable = false;
     enter_tasks();
+}
+
+void run_user(bool fault)
+{
+    user_prepare(0);
+    enter_single_task(USER_ENTRY, fault ? RS_USER_FAULT : RS_USER_HELLO);
+}
+
+const char *run_elf(const uint8_t *file, size_t size)
+{
+    ElfImage image;
+    const char *error = elf_parse(file, size, &image);
+    if (error) {
+        return error;
+    }
+    user_prepare_elf(&image);
+    sync_user_instructions();
+    enter_single_task(image.entry, 0);
+    return nullptr;
 }
 
 void run_tasks(TaskDemo demo)
@@ -79,8 +98,10 @@ void run_tasks(TaskDemo demo)
     };
     running_pair = true;
     time_sliced = demo == TASKS_PREEMPT;
-    prepare_task(0, modes[demo][0]);
-    prepare_task(1, modes[demo][1]);
+    for (unsigned slot = 0; slot < USER_TASK_COUNT; ++slot) {
+        user_prepare(slot);
+        prepare_frame(slot, USER_ENTRY, modes[demo][slot]);
+    }
     enter_tasks();
 }
 

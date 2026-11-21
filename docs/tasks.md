@@ -44,6 +44,8 @@ llvm-objdump -d --disassemble-symbols=rs_compute_begin build/debug/images/user.e
 | `0x40003000` | A 的 4 KiB 用户栈，可读写 | B 的 4 KiB 用户栈，可读写 |
 | `0x40005000` | A 的 4 KiB 数据页，可读写 | B 的 4 KiB 数据页，可读写 |
 
+这张表对应 `tasks` 系列命令。`run hello.elf` 单独使用 A 的任务槽和栈，代码与数据映射来自磁盘 ELF 的 `PT_LOAD` 段。再次运行 `tasks yield`，内核会清掉 A 的 ELF 映射、重新安装内嵌程序的映射并清零任务私有数据。页表决定下一条指令能访问哪些内存，陷阱帧决定从哪里、带着哪些寄存器开始执行。[磁盘程序的装入过程](disk-programs.md)
+
 每次切换都会写 `satp` 并执行 `sfence.vma`。这台内核对所有地址空间使用 ASID 0，旧翻译必须在使用新映射前失效。自研解释器每次访问都遍历页表，参考机可以缓存翻译，这套切换规则适用于两者。[安装页表的汇编](../OS/entry.S) · [VM 页表切换测试](../VM/tests/cpu_tests.cpp)
 
 ## 三种切换各自保留哪个 PC

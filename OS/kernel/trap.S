@@ -140,6 +140,12 @@ enter_tasks:
     csrw sepc, ra
     sret
 
+    .globl sync_user_instructions
+sync_user_instructions:
+    # 刚写入普通 RAM 的 ELF 指令，即将在此 hart 上首次取指。
+    fence.i
+    ret
+
     .globl discard_lr_reservation
 discard_lr_reservation:
     # 一次 SC 会清除本 hart 的旧保留。即使成功，也只写本函数的临时字。

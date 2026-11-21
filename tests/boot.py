@@ -8,6 +8,7 @@ from pathlib import Path
 
 from user_session import COMMANDS, check_user_session
 from task_session import TASK_COMMANDS, check_task_session
+from file_session import FILE_COMMANDS, check_file_session
 
 
 def run_guest(vm, firmware, disk, commands):
@@ -20,7 +21,7 @@ def run_guest(vm, firmware, disk, commands):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("case", choices=("console", "user", "tasks", "ring-wrap", "bad-header", "bad-crc",
+    parser.add_argument("case", choices=("console", "user", "tasks", "files", "ring-wrap", "bad-header", "bad-crc",
                                          "bad-size", "short-disk"))
     parser.add_argument("vm", type=Path)
     parser.add_argument("firmware", type=Path)
@@ -45,6 +46,11 @@ def main():
         rc, output, error = run_guest(args.vm, args.firmware, args.disk, TASK_COMMANDS + b"halt\n")
         if rc == 0:
             check_task_session(output, args.disk.with_name("user.elf"))
+        passed = rc == 0
+    elif args.case == "files":
+        rc, output, error = run_guest(args.vm, args.firmware, args.disk, FILE_COMMANDS + b"halt\n")
+        if rc == 0:
+            check_file_session(output, args.disk.parent)
         passed = rc == 0
     elif args.case == "ring-wrap":
         # Distinct trailing sectors force both rings to revisit slots before CRC validation,

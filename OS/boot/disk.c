@@ -97,6 +97,9 @@ bool disk_open(uint64_t *sectors)
     write_reg(STATUS, 0);
     while (read_reg(STATUS) != 0) {
     }
+    /* S 内核接管同一设备时重建自己的队列，重置后设备从索引 0 开始。 */
+    available.index = 0;
+    used.index = 0;
     write_reg(STATUS, ACKNOWLEDGE);
     write_reg(STATUS, ACKNOWLEDGE | DRIVER);
 
