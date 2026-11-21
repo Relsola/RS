@@ -6,16 +6,18 @@ from serial_session import command_output
 
 FILE_COMMANDS = (b"ls\nls /proc\ncat readme.txt\ncat /proc/..//./readme.txt\n"
                  b"cat /readme.txt/..\nrun hello.elf\nrun readme.txt\ncat missing\n"
-                 b"run /memory.elf\nrun /family.elf\nrun /launch.elf\n")
+                 b"run /memory.elf\nrun /family.elf\nrun /launch.elf\n"
+                 b'run /launch.elf /wc.elf "/readme.txt"\n')
 
 
 def check_file_session(serial, images):
     serial = serial.replace(b"\r\n", b"\n")
     readme = (Path(__file__).resolve().parents[1] / "OS/files/readme.txt").read_bytes()
     listing = f"readme.txt  {len(readme)} bytes\n"
-    for name in ("hello.elf", "memory.elf", "family.elf", "launch.elf"):
+    for name in ("hello.elf", "memory.elf", "family.elf", "launch.elf", "wc.elf"):
         listing += f"{name}  {(images / name).stat().st_size} bytes\n"
     contents = readme.replace(b"\r\n", b"\n")
+    newlines = readme.count(b"\n")
     expected = {
         b"ls": listing.encode() + b"proc/\n",
         b"ls /proc": b"meminfo\n",
@@ -30,6 +32,9 @@ def check_file_session(serial, images):
                              b"parent: page=P file=p wait=37\nuser exit: 0\n"),
         b"run /launch.elf": (b"hello from disk ELF\nchild exit: 0\n"
                              b"launch: child completed\nuser exit: 0\n"),
+        b'run /launch.elf /wc.elf "/readme.txt"': (
+            f"{newlines} {len(readme.split())} {len(readme)} /readme.txt\n".encode()
+            + b"child exit: 0\nlaunch: child completed\nuser exit: 0\n"),
     }
     for command, body in expected.items():
         actual = command_output(serial, command)

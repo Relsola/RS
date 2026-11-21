@@ -1,4 +1,4 @@
-#include <stddef.h>
+#include "string.h"
 
 /* 即使是 freestanding，Clang 也可把结构体赋值和清零生成为这两个 C 调用。 */
 void *memcpy(void *restrict destination, const void *restrict source, size_t count)

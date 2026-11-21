@@ -66,12 +66,11 @@ static const char *file_command(const char *command, const char *name)
     if (equal(command, "ls")) {
         return list_files(name);
     }
-    bool run = equal(command, "run");
-    if (!*name) {
-        return run ? "usage: run NAME" : "usage: cat NAME";
-    }
-    if (run) {
+    if (equal(command, "run")) {
         return run_elf(name);
+    }
+    if (!*name) {
+        return "usage: cat NAME";
     }
     VfsFile file;
     const char *error = vfs_open(name, &file);
@@ -102,7 +101,7 @@ static void execute(char *line)
                   "info        show boot and console details\n"
                   "ls [PATH]   list a directory\n"
                   "cat PATH    print a file\n"
-                  "run PATH    load and execute an ELF\n"
+                  "run PATH [ARG ...]  load and execute an ELF\n"
                   "ticks       show timer interrupt count\n"
                   "user        run the user-mode program\n"
                   "user fault  demonstrate user-mode memory protection\n"

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 
+from argv_session import EXECV, SHOW, argument_cases
 from reference import run_reference
 from serial_session import command_output
 from vfs_vm_tests import ROOT, boot, compile_guest, expect, stats
@@ -158,17 +159,20 @@ def main():
         disk = temp / "exec.img"
         stream = temp / "stream"
         stream.write_bytes(b"xyz")
+        words = temp / "words"
+        words.write_bytes(b"w" * 129 + b"\tx\ny")
         pack = [sys.executable, ROOT / "tools/mkdisk.py", args.disk.with_name("kernel.bin"),
-                disk, "--file", f"stream={stream}"]
+                disk, "--file", f"stream={stream}", "--file", f"words={words}",
+                "--file", f"wc={args.disk.with_name('wc.elf')}"]
         for name, source in (("caller", CHILD_EXEC), ("callee", CALLEE), ("parent", PARENT_EXEC),
-                             ("waiter", WAITER), ("self", SELF_EXEC)):
-            elf = compile_guest(temp, name, source, assembly=name == "callee")
+                             ("waiter", WAITER), ("self", SELF_EXEC), ("show", SHOW), ("execv", EXECV)):
+            elf = compile_guest(temp, name, source, assembly=name in ("callee", "show"))
             pack.extend(["--file", f"{name}={elf}"])
         subprocess.run(pack, check=True)
         for name, expected in (
                 (b"caller", b"child exit: 73\nuser exit: 0\n"),
                 (b"parent", b"child kept original image\nchild exit: 29\nuser exit: 0\n"),
-                (b"self", b"user exit: 42\n")):
+                (b"self", b"user exit: 42\n"), *argument_cases()):
             command = b"run " + name
             commands = command + b"\ncat /proc/meminfo\n"
             if args.qemu:

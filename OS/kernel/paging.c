@@ -75,6 +75,7 @@ static void copy_page(uint8_t *destination, const uint8_t *source)
 }
 
 uint64_t install_page_table(uint64_t satp);
+void zero_page(void *page);
 void invalidate_user_page(uintptr_t address);
 void invalidate_user_pages(uintptr_t start, unsigned count);
 
@@ -144,9 +145,7 @@ static bool make_anonymous_writable(AddressSpace *space, uintptr_t address)
             if (old) {
                 copy_page(frames[frame], physical_page(old));
             } else {
-                for (size_t i = 0; i < USER_PAGE_SIZE; ++i) {
-                    frames[frame][i] = 0;
-                }
+                zero_page(frames[frame]);
             }
             frame_refs[frame] = 1;
             ++stats.resident_pages;
@@ -245,9 +244,7 @@ static void reset_user_pages(unsigned slot)
 {
     AddressSpace *space = &spaces[slot];
     user_release(slot);
-    for (size_t i = 0; i < USER_PAGE_SIZE; ++i) {
-        space->stack[i] = 0;
-    }
+    zero_page(space->stack);
 }
 
 void user_prepare(unsigned slot)
@@ -258,9 +255,7 @@ void user_prepare(unsigned slot)
         entry((uintptr_t)user_image_page, USER_PAGE | READ | EXECUTE | ACCESSED);
     space->user_l0[index_at(RS_USER_DATA_BASE, PAGE_SHIFT)] =
         entry((uintptr_t)space->data, USER_PAGE | READ | WRITE | ACCESSED | DIRTY);
-    for (size_t i = 0; i < USER_PAGE_SIZE; ++i) {
-        space->data[i] = 0;
-    }
+    zero_page(space->data);
 }
 
 /* fork 后，子进程的只读 ELF 叶项可能还指向父槽。覆写这些字节前给子进程留一份。 */
@@ -275,7 +270,7 @@ static void preserve_child_image_page(size_t page_index, uint8_t *parent_page)
     }
 }
 
-void user_prepare_elf(unsigned slot, const ElfImage *image)
+uintptr_t user_prepare_elf(unsigned slot, const ElfImage *image, const ExecArgs *args)
 {
     AddressSpace *space = &spaces[slot];
     reset_user_pages(slot);
@@ -297,15 +292,14 @@ void user_prepare_elf(unsigned slot, const ElfImage *image)
                 preserve_child_image_page(n, page);
             }
             /* 页首尾的段外字节也会对 U 可见，因此清空整个页。 */
-            for (size_t j = 0; j < USER_PAGE_SIZE; ++j) {
-                page[j] = 0;
-            }
+            zero_page(page);
             space->user_l0[index_at(USER_ELF_BASE, PAGE_SHIFT) + n] = entry((uintptr_t)page, flags);
         }
         for (size_t j = 0; j < segment->file_size; ++j) {
             space->program_memory[start + j] = segment->bytes[j];
         }
     }
+    return args ? exec_args_install(args, space->stack) : 0;
 }
 
 /* 固定布局的可写页使用子槽的预留内存，克隆这些页无需占用匿名页池。 */
@@ -362,24 +356,38 @@ static bool user_range(uintptr_t address, size_t length)
     return address >= USER_ENTRY && address < limit && length <= limit - address;
 }
 
-bool user_copy_path(unsigned slot, char *destination, size_t capacity, uintptr_t address, size_t length)
+/* 读取旧映像而不兑现匿名预留，以便 exec 的验证失败时保留原有驻留页数。 */
+bool user_peek(unsigned slot, void *destination, uintptr_t address, size_t length)
 {
-    if (!length || length >= capacity || !user_range(address, length)) {
+    if (!user_range(address, length)) {
         return false;
     }
+    const AddressSpace *space = &spaces[slot];
+    uint8_t *out = destination;
     const unsigned readable = VALID | USER_PAGE | READ;
     for (size_t i = 0; i < length; ++i) {
         uintptr_t at = address + i;
-        uint64_t pte = spaces[slot].user_l0[index_at(at, PAGE_SHIFT)];
-        /* 一张尚未兑现的匿名页读作全零，零字节不能出现在显式长度路径内。 */
-        if ((pte & readable) != readable) {
+        uint64_t pte = space->user_l0[index_at(at, PAGE_SHIFT)];
+        if ((pte & readable) == readable) {
+            out[i] = physical_page(pte)[at & (USER_PAGE_SIZE - 1)];
+        } else if (!pte && reserved_page(space, at)) {
+            out[i] = 0;
+        } else {
             return false;
         }
-        char byte = (char)physical_page(pte)[at & (USER_PAGE_SIZE - 1)];
-        if (!byte) {
+    }
+    return true;
+}
+
+bool user_copy_path(unsigned slot, char *destination, size_t capacity, uintptr_t address, size_t length)
+{
+    if (!length || length >= capacity || !user_peek(slot, destination, address, length)) {
+        return false;
+    }
+    for (size_t i = 0; i < length; ++i) {
+        if (!destination[i]) {
             return false;
         }
-        destination[i] = byte;
     }
     destination[length] = '\0';
     return true;

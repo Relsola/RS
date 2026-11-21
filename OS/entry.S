@@ -7,6 +7,10 @@ _start:
     csrw sscratch, zero
     la t0, supervisor_trap_entry
     csrw stvec, t0
+#ifdef __riscv_zicboz
+    li t0, 1 << 7
+    csrs senvcfg, t0       # 允许 U 模式在有写权限的内存上执行 cbo.zero。
+#endif
 #else
     la t0, .Ltrap
     csrw mtvec, t0
@@ -52,8 +56,16 @@ enter_kernel:
     csrw medeleg, t0
     # 允许 S 模式读取 time、设置 stimecmp，并将定时器中断交给 S 处理。
     csrsi mcounteren, 2
-    li t0, 1 << 63
+    li t0, (1 << 63) | (1 << 7)  # menvcfg.STCE 和 CBZE
     csrs menvcfg, t0
+    # S 还须获准访问 senvcfg，才能自行授予 U 模式块清零权限。
+    li t0, 1 << 62
+    csrs mstateen0, t0
+    csrr t1, misa
+    andi t1, t1, (1 << 7)
+    beqz t1, .Lstate_ready
+    csrw hstateen0, zero   # 有 H 的参考机上，初始化下一级状态使能。
+.Lstate_ready:
     li t0, 1 << 5
     csrs mideleg, t0
     csrw satp, zero
@@ -76,6 +88,23 @@ install_page_table:
 
 #ifdef RS_SUPERVISOR
 #include "user/layout.h"
+    .section .text.zero_page, "ax"
+    .globl zero_page
+zero_page:
+    # 调用者传入一个完整且按页对齐的 4 KiB 页。RVA23 的清零块为 64 字节。
+    li t0, USER_PAGE_SIZE
+    add t0, a0, t0
+.Lzero_page:
+#ifdef __riscv_zicboz
+    cbo.zero (a0)
+    addi a0, a0, 64
+#else
+    sd zero, 0(a0)
+    addi a0, a0, 8
+#endif
+    bne a0, t0, .Lzero_page
+    ret
+
     .section .text.invalidate_user_pages, "ax"
     .globl invalidate_user_page
 invalidate_user_page:

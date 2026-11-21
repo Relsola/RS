@@ -33,6 +33,8 @@ System halted.
 | `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
 | `run /family.elf` | 父进程派生子进程。观察同一地址上父读到 `P`、子读到 `C`，继承的文件描述符则从同一游标接着读 |
 | `run /launch.elf` | 子进程执行 `exec` 换入磁盘上的 `hello.elf`。父进程继续执行原程序，等到子进程退出后打印完成消息 |
+| `run /wc.elf /readme.txt` | 将文件路径传给用户程序，读回 `2 12 64 /readme.txt`，分别是换行符数、词数和字节数 |
+| `run /launch.elf /wc.elf /readme.txt` | 子进程用 `execv` 把参数传给新程序。对照上一条命令，可以观察计数完成后父进程领到的退出状态 |
 | `ticks` | 查看内核实际处理过的监管定时器中断次数 |
 | `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
 | `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
@@ -63,6 +65,7 @@ System halted.
 9. [虚拟文件系统](docs/vfs.md)解释磁盘文件和内核生成的 `/proc/meminfo` 如何共用路径、打开、读取接口。
 10. [匿名虚拟内存](docs/virtual-memory.md)追踪预留地址、按需分配物理页、重试指令与释放映射。
 11. [跟踪一次 fork 和 wait](docs/fork.md)把同一段串口输出对应到陷阱帧、共享页框和文件游标。
-12. [从 fork 到 exec](docs/exec.md)跟踪父子进程各自更换程序时，代码页、寄存器和打开文件的去向。
+12. [从 fork 到 exec](docs/exec.md)跟踪进程更换程序时，代码页与文件的去向，并在栈布局表中找到 `argc` 对应的每个参数。
 13. [Svnapot 的 64 KiB 映射](docs/svnapot.md)与 [Svinval 的批量失效](docs/svinval.md)分别对应磁盘缓存和写时复制的内核代码。
-14. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+14. [从一条 cbo.zero 到一张零页](docs/cache-blocks.md)跟踪固件授权、块边界和写时复制缺页。
+15. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

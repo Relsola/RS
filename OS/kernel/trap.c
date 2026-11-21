@@ -54,14 +54,15 @@ uint64_t timer_ticks(void)
     return tick_count;
 }
 
-static void prepare_frame(unsigned slot, uintptr_t entry, unsigned program_mode)
+static void prepare_frame(unsigned slot, uintptr_t entry, unsigned a0, uintptr_t argv)
 {
     Task *task = &tasks[slot];
     for (unsigned i = 0; i < 32; ++i) {
         task->frame.x[i] = 0;
     }
-    task->frame.x[2] = USER_STACK_TOP;
-    task->frame.x[REG_A0] = program_mode;
+    task->frame.x[2] = argv ? argv : USER_STACK_TOP;
+    task->frame.x[REG_A0] = a0;
+    task->frame.x[REG_A1] = argv;
     task->frame.epc = entry;
     task->frame.status = STATUS_SPIE; /* SPP=U，sret 后恢复 S 级中断使能。 */
     task->state = RUNNABLE;
@@ -78,11 +79,11 @@ static void enter_single_task(void)
 void run_user(bool fault)
 {
     user_prepare(0);
-    prepare_frame(0, USER_ENTRY, fault ? RS_USER_FAULT : RS_USER_HELLO);
+    prepare_frame(0, USER_ENTRY, fault ? RS_USER_FAULT : RS_USER_HELLO, 0);
     enter_single_task();
 }
 
-static const char *load_program(unsigned slot, const char *path)
+static const char *load_program(unsigned slot, const char *path, const ExecArgs *args)
 {
     VfsFile file;
     const char *error = vfs_open(path, &file);
@@ -100,15 +101,21 @@ static const char *load_program(unsigned slot, const char *path)
         return error;
     }
     /* 固定的 ELF 页缓冲已经预留。通过完整验证后，下面的替换无需再次分配资源。 */
-    user_prepare_elf(slot, &image);
+    uintptr_t argv = user_prepare_elf(slot, &image, args);
     sync_user_instructions();
-    prepare_frame(slot, image.entry, 0);
+    prepare_frame(slot, image.entry, args ? args->count : 0, argv);
     return nullptr;
 }
 
-const char *run_elf(const char *path)
+const char *run_elf(const char *line)
 {
-    const char *error = load_program(0, path);
+    ExecArgs args;
+    const char *error = exec_args_parse(&args, line);
+    if (error) {
+        return error;
+    }
+    /* 单独运行文件保留原来的空栈入口。带参数时 argv[0] 是 shell 中的文件名。 */
+    error = load_program(0, args.text, args.count > 1 ? &args : nullptr);
     if (error) {
         return error;
     }
@@ -116,11 +123,13 @@ const char *run_elf(const char *path)
     return nullptr;
 }
 
-static void exec_current(TrapFrame *frame)
+static void exec_current(TrapFrame *frame, bool with_args)
 {
     char path[VFS_PATH_BYTES];
+    ExecArgs args;
     if (!user_copy_path(current, path, sizeof(path), frame->x[REG_A0], frame->x[REG_A1]) ||
-        load_program(current, path)) {
+        (with_args && !exec_args_read(&args, current, frame->x[REG_A2])) ||
+        load_program(current, path, with_args ? &args : nullptr)) {
         frame->x[REG_A0] = UINT64_MAX;
         return;
     }
@@ -141,7 +150,7 @@ void run_tasks(TaskDemo demo)
     time_sliced = demo == TASKS_PREEMPT;
     for (unsigned slot = 0; slot < USER_TASK_COUNT; ++slot) {
         user_prepare(slot);
-        prepare_frame(slot, USER_ENTRY, modes[demo][slot]);
+        prepare_frame(slot, USER_ENTRY, modes[demo][slot], 0);
     }
     enter_tasks();
 }
@@ -332,7 +341,8 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
     case RS_SYS_WAIT:
         return wait_child(frame);
     case RS_SYS_EXEC:
-        exec_current(frame);
+    case RS_SYS_EXECV:
+        exec_current(frame, frame->x[REG_A7] == RS_SYS_EXECV);
         break;
     case RS_SYS_YIELD:
         frame->x[REG_A0] = 0;
