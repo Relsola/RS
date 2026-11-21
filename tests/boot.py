@@ -11,9 +11,9 @@ from task_session import TASK_COMMANDS, check_task_session
 from file_session import FILE_COMMANDS, check_file_session
 
 
-def run_guest(vm, firmware, disk, commands):
+def run_guest(vm, firmware, disk, commands, *, max_steps=6_000_000):
     process = subprocess.run(
-        [vm, "--firmware", firmware, "--disk", disk, "--max-steps", "6000000"],
+        [vm, "--firmware", firmware, "--disk", disk, "--max-steps", str(max_steps)],
         input=commands, capture_output=True, timeout=15,
     )
     return process.returncode, process.stdout.replace(b"\r\n", b"\n"), process.stderr
@@ -48,7 +48,9 @@ def main():
             check_task_session(output, args.disk.with_name("user.elf"))
         passed = rc == 0
     elif args.case == "files":
-        rc, output, error = run_guest(args.vm, args.firmware, args.disk, FILE_COMMANDS + b"halt\n")
+        # Each ELF load reads sectors and checks the entire file's CRC in guest code.
+        rc, output, error = run_guest(args.vm, args.firmware, args.disk, FILE_COMMANDS + b"halt\n",
+                                      max_steps=10_000_000)
         if rc == 0:
             check_file_session(output, args.disk.parent)
         passed = rc == 0

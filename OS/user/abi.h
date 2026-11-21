@@ -13,6 +13,7 @@
 #define RS_SYS_UNMAP 9
 #define RS_SYS_FORK  10
 #define RS_SYS_WAIT  11
+#define RS_SYS_EXEC  12
 
 /* 进入 user_main 时，a0 选择这次运行的用户入口行为。 */
 #define RS_USER_HELLO     0

@@ -237,12 +237,18 @@ bool cpu_system(Cpu *cpu, uint32_t insn, uint64_t *next_pc, uint64_t *result, bo
     if (((insn >> 12) & 7) != 0) {
         return csr_instruction(cpu, insn, result, wrote_instret);
     }
-    if ((insn & 0xfe007fff) == 0x12000073) { // SFENCE.VMA rs1,rs2：本机无 TLB。
+    // 这两条指令的 rs1、rs2 分别选择虚拟地址和 ASID。本机每次访存都查表。
+    const uint32_t fixed_bits = insn & 0xfe007fff;
+    if (fixed_bits == 0x12000073 || fixed_bits == 0x16000073) { // SFENCE.VMA, SINVAL.VMA
         return cpu->privilege == MACHINE ||
                (cpu->privilege == SUPERVISOR && (cpu->mstatus & TVM) == 0);
     }
     const uint64_t status = cpu->mstatus;
     switch (insn) {
+    case 0x18000073: // SFENCE.W.INVAL
+    case 0x18100073: // SFENCE.INVAL.IR
+        // 页表写入和隐式查表都已按序完成。两个排序指令在 S 态均不受 TVM 限制。
+        return cpu->privilege != USER;
     case 0x00000073:
         cpu_trap(cpu, static_cast<TrapCause>(8 + cpu->privilege), 0);
         return true;

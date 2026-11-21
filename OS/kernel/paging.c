@@ -1,4 +1,5 @@
 #include "paging.h"
+#include "fs.h"
 
 #include <stdint.h>
 
@@ -20,6 +21,7 @@ alignas(4096) static uint64_t device_l1[TABLE_ENTRIES];
 alignas(4096) static uint64_t control_l0[TABLE_ENTRIES];
 alignas(4096) static uint64_t uart_l0[TABLE_ENTRIES];
 alignas(4096) static uint64_t ram_l1[TABLE_ENTRIES];
+alignas(4096) static uint64_t file_cache_l0[TABLE_ENTRIES];
 extern const uint8_t user_image_page[USER_PAGE_SIZE];
 
 typedef struct {
@@ -74,6 +76,7 @@ static void copy_page(uint8_t *destination, const uint8_t *source)
 
 uint64_t install_page_table(uint64_t satp);
 void invalidate_user_page(uintptr_t address);
+void invalidate_user_pages(uintptr_t start, unsigned count);
 
 VmStats vm_stats(void)
 {
@@ -216,6 +219,11 @@ void user_release(unsigned slot)
     while (space->area_count) {
         drop_area(space, space->areas[--space->area_count]);
     }
+    space->user_l0[index_at(USER_ENTRY, PAGE_SHIFT)] = 0;
+    space->user_l0[index_at(RS_USER_DATA_BASE, PAGE_SHIFT)] = 0;
+    for (unsigned i = 0; i < USER_ELF_PAGES; ++i) {
+        space->user_l0[index_at(USER_ELF_BASE, PAGE_SHIFT) + i] = 0;
+    }
 }
 
 static uint64_t root_satp(const uint64_t *root)
@@ -237,11 +245,6 @@ static void reset_user_pages(unsigned slot)
 {
     AddressSpace *space = &spaces[slot];
     user_release(slot);
-    space->user_l0[index_at(USER_ENTRY, PAGE_SHIFT)] = 0;
-    space->user_l0[index_at(RS_USER_DATA_BASE, PAGE_SHIFT)] = 0;
-    for (unsigned i = 0; i < USER_ELF_PAGES; ++i) {
-        space->user_l0[index_at(USER_ELF_BASE, PAGE_SHIFT) + i] = 0;
-    }
     for (size_t i = 0; i < USER_PAGE_SIZE; ++i) {
         space->stack[i] = 0;
     }
@@ -260,10 +263,22 @@ void user_prepare(unsigned slot)
     }
 }
 
-void user_prepare_elf(const ElfImage *image)
+/* fork 后，子进程的只读 ELF 叶项可能还指向父槽。覆写这些字节前给子进程留一份。 */
+static void preserve_child_image_page(size_t page_index, uint8_t *parent_page)
 {
-    AddressSpace *space = &spaces[0];
-    reset_user_pages(0);
+    AddressSpace *child = &spaces[1];
+    uint64_t *leaf = &child->user_l0[index_at(USER_ELF_BASE, PAGE_SHIFT) + page_index];
+    if (*leaf && physical_page(*leaf) == parent_page) {
+        uint8_t *copy = child->program_memory + page_index * USER_PAGE_SIZE;
+        copy_page(copy, parent_page);
+        *leaf = entry((uintptr_t)copy, (unsigned)(*leaf & 0x3ff));
+    }
+}
+
+void user_prepare_elf(unsigned slot, const ElfImage *image)
+{
+    AddressSpace *space = &spaces[slot];
+    reset_user_pages(slot);
     for (unsigned i = 0; i < image->count; ++i) {
         const ElfSegment *segment = &image->segments[i];
         size_t start = segment->address - USER_ELF_BASE;
@@ -278,6 +293,9 @@ void user_prepare_elf(const ElfImage *image)
         }
         for (size_t n = first_page; n <= last_page; ++n) {
             uint8_t *page = space->program_memory + n * USER_PAGE_SIZE;
+            if (slot == 0) {
+                preserve_child_image_page(n, page);
+            }
             /* 页首尾的段外字节也会对 U 可见，因此清空整个页。 */
             for (size_t j = 0; j < USER_PAGE_SIZE; ++j) {
                 page[j] = 0;
@@ -331,17 +349,45 @@ void user_clone(unsigned parent_slot, unsigned child_slot)
             ++frame_refs[anonymous_frame(leaf)];
             parent->user_l0[index] = shared;
             child->user_l0[index] = shared;
-            /* 当前页表仍属于父进程，立即清除可能缓存的父进程写权。 */
-            invalidate_user_page(address);
         }
+        /* 在回到 U 模式前整段撤销旧写权，两端的排序屏障各执行一次。 */
+        invalidate_user_pages(ANON_BASE + area.first * USER_PAGE_SIZE, area.count);
     }
+}
+
+static bool user_range(uintptr_t address, size_t length)
+{
+    /* user_l0 只描述这个 2 MiB 范围。先检查区间，再使用末级索引。 */
+    const uintptr_t limit = USER_ENTRY + (1u << MEGAPAGE_SHIFT);
+    return address >= USER_ENTRY && address < limit && length <= limit - address;
+}
+
+bool user_copy_path(unsigned slot, char *destination, size_t capacity, uintptr_t address, size_t length)
+{
+    if (!length || length >= capacity || !user_range(address, length)) {
+        return false;
+    }
+    const unsigned readable = VALID | USER_PAGE | READ;
+    for (size_t i = 0; i < length; ++i) {
+        uintptr_t at = address + i;
+        uint64_t pte = spaces[slot].user_l0[index_at(at, PAGE_SHIFT)];
+        /* 一张尚未兑现的匿名页读作全零，零字节不能出现在显式长度路径内。 */
+        if ((pte & readable) != readable) {
+            return false;
+        }
+        char byte = (char)physical_page(pte)[at & (USER_PAGE_SIZE - 1)];
+        if (!byte) {
+            return false;
+        }
+        destination[i] = byte;
+    }
+    destination[length] = '\0';
+    return true;
 }
 
 static bool prepare_buffer(AddressSpace *space, uintptr_t address, size_t length, unsigned required)
 {
-    /* user_l0 只描述这个 2 MiB 范围。先检查区间，再使用末级索引。 */
-    const uintptr_t limit = USER_ENTRY + (1u << MEGAPAGE_SHIFT);
-    if (address < USER_ENTRY || address >= limit || length > limit - address) {
+    if (!user_range(address, length)) {
         return false;
     }
     uintptr_t first = address & ~(uintptr_t)(USER_PAGE_SIZE - 1);
@@ -419,6 +465,25 @@ bool user_copy_out(unsigned slot, uintptr_t address, const void *source, size_t 
     return copy_user(slot, address, length, nullptr, source);
 }
 
+/* 按链接器给出的缓存位置，把所在的 2 MiB 恒等映射拆为末级表。
+   缓存的十六个叶项共同描述一个 64 KiB、不可执行的 Svnapot 区域。 */
+static void map_file_cache(unsigned rw)
+{
+    static_assert(sizeof(fs_file_cache) == 16 * USER_PAGE_SIZE);
+    uintptr_t cache = (uintptr_t)fs_file_cache;
+    uintptr_t base = cache & ~(((uintptr_t)1 << MEGAPAGE_SHIFT) - 1);
+    for (unsigned i = 0; i < TABLE_ENTRIES; ++i) {
+        file_cache_l0[i] = entry(base + i * USER_PAGE_SIZE, rw | EXECUTE);
+    }
+    /* N=1、PPN 低四位为 1000。MMU 会用 VPN 的低四位选择实际物理页。 */
+    uint64_t leaf = (UINT64_C(1) << 63) | entry(cache + 8 * USER_PAGE_SIZE, rw);
+    unsigned first = index_at(cache, PAGE_SHIFT);
+    for (unsigned i = 0; i < 16; ++i) {
+        file_cache_l0[first + i] = leaf;
+    }
+    ram_l1[index_at(cache, MEGAPAGE_SHIFT)] = entry((uintptr_t)file_cache_l0, 0);
+}
+
 bool paging_enable(void)
 {
     const uintptr_t control = 0x00100000;
@@ -441,6 +506,7 @@ bool paging_enable(void)
         uintptr_t address = ram + ((uintptr_t)i << MEGAPAGE_SHIFT);
         ram_l1[index_at(address, MEGAPAGE_SHIFT)] = entry(address, rw | EXECUTE);
     }
+    map_file_cache(rw);
     for (unsigned slot = 0; slot < USER_TASK_COUNT; ++slot) {
         AddressSpace *space = &spaces[slot];
         space->root[device_region] = kernel_root[device_region];

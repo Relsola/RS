@@ -50,7 +50,7 @@ rs_guest_image(user user/user.ld rv64imac
     FLAGS "-DRS_USER_BASE=${user_base}" "-Wl,--defsym=USER_BASE=${user_base},--defsym=USER_DATA_BASE=${user_data_base}"
     DEPENDS user/abi.h user/api.h user/layout.h)
 
-rs_guest_image(kernel image.ld rv64imac_zicsr_zifencei_sstc
+rs_guest_image(kernel image.ld rv64imac_zicsr_zifencei_sstc_svinval_svnapot
     SOURCES entry.S platform.c boot/disk.c kernel/fs.c kernel/vfs.c kernel/procfs.c kernel/elf.c
         kernel/shell.c kernel/user_files.c kernel/paging.c kernel/string.c kernel/trap.c kernel/trap.S user/embed.S
     FLAGS -DRS_SUPERVISOR=1 "-DRS_USER_BASE=${user_base}" "-DRS_USER_DATA_BASE=${user_data_base}" "-I${image_dir}"
@@ -73,6 +73,11 @@ rs_guest_image(family user/disk.ld rv64imac ELF_ONLY
     FLAGS "-Wl,--defsym=APP_BASE=0x40010000"
     DEPENDS user/abi.h user/api.h)
 
+rs_guest_image(launch user/disk.ld rv64imac ELF_ONLY
+    SOURCES user/launch.c user/syscall.S
+    FLAGS "-Wl,--defsym=APP_BASE=0x40010000"
+    DEPENDS user/abi.h user/api.h)
+
 set(disk_builder "${CMAKE_CURRENT_SOURCE_DIR}/../tools/mkdisk.py")
 add_custom_command(
     OUTPUT "${image_dir}/disk.img"
@@ -82,9 +87,10 @@ add_custom_command(
         --file "hello.elf=${image_dir}/hello.elf"
         --file "memory.elf=${image_dir}/memory.elf"
         --file "family.elf=${image_dir}/family.elf"
+        --file "launch.elf=${image_dir}/launch.elf"
     DEPENDS "${image_dir}/kernel.bin" "${disk_builder}"
         "${CMAKE_CURRENT_SOURCE_DIR}/files/readme.txt" "${image_dir}/hello.elf"
-        "${image_dir}/memory.elf" "${image_dir}/family.elf"
+        "${image_dir}/memory.elf" "${image_dir}/family.elf" "${image_dir}/launch.elf"
     COMMENT "Packing the boot disk"
     VERBATIM
 )

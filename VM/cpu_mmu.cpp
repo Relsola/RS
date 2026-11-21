@@ -86,16 +86,25 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
                 const bool valid = (pte & 1) != 0, read = (pte & 2) != 0;
                 const bool write = (pte & 4) != 0, execute = (pte & 8) != 0;
                 const bool user = (pte & 16) != 0, accessed = (pte & 64) != 0, dirty = (pte & 128) != 0;
-                if (!valid || (!read && write) || (pte >> 54) != 0) {
+                constexpr uint64_t n_bit = uint64_t{1} << 63;
+                const bool napot = (pte & n_bit) != 0;
+                if (!valid || (!read && write) || ((pte & ~n_bit) >> 54) != 0) {
                     break;
                 }
-                const uint64_t ppn = (pte >> 10) & PPN_MASK;
+                uint64_t ppn = (pte >> 10) & PPN_MASK;
                 if (!read && !execute) {
-                    if (user || accessed || dirty) {
-                        break; // 非叶项的 U/A/D 位保留。
+                    if (napot || user || accessed || dirty) {
+                        break; // 非叶项的 N/U/A/D 位保留。
                     }
                     table = ppn << 12;
                     continue;
+                }
+                if (napot) {
+                    // Svnapot 1.0 的 64 KiB 编码：PPN 低四位为 1000，翻译时用 VPN 低四位替换。
+                    if (level != 0 || (ppn & 0xf) != 8) {
+                        break;
+                    }
+                    ppn = (ppn & ~uint64_t{0xf}) | (index & 0xf);
                 }
                 if ((mode == USER && !user) ||
                     (mode == SUPERVISOR && user && (access == Access::Fetch || !(cpu->mstatus & SUM)))) {

@@ -9,7 +9,7 @@ enum { TABLE_START = 32, RECORD_BYTES = 32, FILE_LIMIT = (SECTOR_BYTES - TABLE_S
 static FsFile files[FILE_LIMIT];
 static unsigned file_count;
 alignas(16) static uint8_t sector_buffer[SECTOR_BYTES];
-alignas(16) static uint8_t file_buffer[FS_MAX_FILE_BYTES];
+alignas(FS_MAX_FILE_BYTES) uint8_t fs_file_cache[FS_MAX_FILE_BYTES];
 static const FsFile *cached_file;
 static_assert(FS_MAX_FILE_BYTES % SECTOR_BYTES == 0);
 
@@ -149,7 +149,7 @@ static const char *fs_load(const FsFile *file, const uint8_t **bytes)
 {
     *bytes = nullptr;
     if (file == cached_file) {
-        *bytes = file_buffer;
+        *bytes = fs_file_cache;
         return nullptr;
     }
     /* DMA 会覆盖旧内容。遇到短读或 CRC 错误时，旧标签必须已经失效。 */
@@ -157,15 +157,15 @@ static const char *fs_load(const FsFile *file, const uint8_t **bytes)
     /* 实际 DMA 以完整扇区为单位，静态缓冲区已按可接收的最大文件向上对齐。 */
     uint64_t count = sector_count(file->size);
     for (uint64_t i = 0; i < count; ++i) {
-        if (!disk_read_sector(file->first_sector + i, file_buffer + i * SECTOR_BYTES)) {
+        if (!disk_read_sector(file->first_sector + i, fs_file_cache + i * SECTOR_BYTES)) {
             return "file read failed";
         }
     }
-    if (crc32(file_buffer, file->size) != file->crc32) {
+    if (crc32(fs_file_cache, file->size) != file->crc32) {
         return "file CRC mismatch";
     }
     cached_file = file;
-    *bytes = file_buffer;
+    *bytes = fs_file_cache;
     return nullptr;
 }
 

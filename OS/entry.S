@@ -74,8 +74,24 @@ install_page_table:
     csrr a0, satp
     ret
 
-    .section .text.invalidate_user_page, "ax"
+#ifdef RS_SUPERVISOR
+#include "user/layout.h"
+    .section .text.invalidate_user_pages, "ax"
     .globl invalidate_user_page
 invalidate_user_page:
-    sfence.vma a0, zero
+    li a1, 1
+    # 单页调用沿用下方的区间路径。
+    .globl invalidate_user_pages
+invalidate_user_pages:
+    beqz a1, .Linval_done
+    li t0, USER_PAGE_SIZE
+    sfence.w.inval
+.Linval_page:
+    sinval.vma a0, zero
+    add a0, a0, t0
+    addi a1, a1, -1
+    bnez a1, .Linval_page
+    sfence.inval.ir
+.Linval_done:
     ret
+#endif

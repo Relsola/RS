@@ -32,6 +32,7 @@ System halted.
 | `run hello.elf` | 内核从磁盘装入独立编译的 RISC-V ELF，设置代码和数据页的权限，在 U 模式执行，程序退出后回到 shell |
 | `run /memory.elf` | 用户程序申请内存，首次访问时触发缺页，再把磁盘文件读入跨页缓冲区，输出并释放内存 |
 | `run /family.elf` | 父进程派生子进程。观察同一地址上父读到 `P`、子读到 `C`，继承的文件描述符则从同一游标接着读 |
+| `run /launch.elf` | 子进程执行 `exec` 换入磁盘上的 `hello.elf`。父进程继续执行原程序，等到子进程退出后打印完成消息 |
 | `ticks` | 查看内核实际处理过的监管定时器中断次数 |
 | `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
 | `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
@@ -62,4 +63,6 @@ System halted.
 9. [虚拟文件系统](docs/vfs.md)解释磁盘文件和内核生成的 `/proc/meminfo` 如何共用路径、打开、读取接口。
 10. [匿名虚拟内存](docs/virtual-memory.md)追踪预留地址、按需分配物理页、重试指令与释放映射。
 11. [跟踪一次 fork 和 wait](docs/fork.md)把同一段串口输出对应到陷阱帧、共享页框和文件游标。
-12. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。
+12. [从 fork 到 exec](docs/exec.md)跟踪父子进程各自更换程序时，代码页、寄存器和打开文件的去向。
+13. [Svnapot 的 64 KiB 映射](docs/svnapot.md)与 [Svinval 的批量失效](docs/svinval.md)分别对应磁盘缓存和写时复制的内核代码。
+14. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

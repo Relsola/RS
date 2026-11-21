@@ -51,15 +51,9 @@ static OpenFile *lookup(unsigned slot, uint64_t fd)
 long user_file_open(unsigned slot, uintptr_t path, size_t length)
 {
     char name[VFS_PATH_BYTES];
-    if (!length || length >= sizeof(name) || !user_copy_in(slot, name, path, length)) {
+    if (!user_copy_path(slot, name, sizeof(name), path, length)) {
         return -1;
     }
-    for (size_t i = 0; i < length; ++i) {
-        if (name[i] == '\0') {
-            return -1;
-        }
-    }
-    name[length] = '\0';
     unsigned index = 0;
     while (index < FILES_PER_TASK && descriptors[slot][index]) {
         ++index;

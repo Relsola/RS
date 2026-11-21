@@ -6,12 +6,13 @@
 | --- | --- | --- |
 | Windows `rs-vm.exe` | 本机 x64，C++23，`CMAKE_CXX_COMPILER=clang` | CMake 指定系统链接器。`clang -fuse-ld=link` 调用微软 `link.exe`，使用 MSVC 标准库、CRT 和 Windows SDK |
 | `firmware.elf` | `riscv64-unknown-elf`，RV64IM + Zicsr + Zifencei + Sstc，LP64 | `clang` 调用 `ld.lld`，由链接脚本决定入口和地址 |
-| `kernel.elf` | 同一目标，另外启用 A 原子指令和 C 压缩指令，LP64 | freestanding C23，使用自编入口、串口和内核函数 |
+| `kernel.elf` | RV64IMAC + Zicsr、Zifencei、Sstc、Svinval、Svnapot，LP64 | freestanding C23，使用自编入口、串口和内核函数 |
 | `user.elf` | RV64IMAC，LP64，入口在用户虚拟地址 `0x40000000` | 两个任务执行同一用户镜像。代码和常量嵌入内核的只读页，内核分别分配并清零各任务的栈和数据页 |
 | `hello.elf` | RV64IMAC + Zba、Zbb、Zcb、Zicond，LP64，用户装载区从 `0x40010000` 开始 | C23 程序与汇编辅助函数静态链接为 ELF64，可执行段和可写段分别记录在程序头中，整份 ELF 作为文件写入 RSFS |
 | `memory.elf` | RV64IMAC，LP64，与 `hello.elf` 使用同一用户装载区 | 独立的 C23 程序，调用 `open/read/close` 和 `map/unmap`，观察匿名页的按需分配与跨页读文件 |
 | `family.elf` | RV64IMAC，LP64，同一用户装载区 | 独立的 C23 程序，派生子进程并观察匿名页、文件偏移和退出码 |
-| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 写入启动头、内核、RSFS 目录、`readme.txt` 和上述三个磁盘程序 |
+| `launch.elf` | RV64IMAC，LP64，同一用户装载区 | 子进程调用 `exec` 换入另一份磁盘 ELF，父进程收取退出结果 |
+| `disk.img` | 512 字节扇区的原始磁盘 | `llvm-objcopy` 生成裸内核，Python 写入启动头、内核、RSFS 目录、`readme.txt` 和上述四个磁盘程序 |
 
 在两端之间传输数据时，磁盘头、描述符和寄存器都有显式位宽与小端格式。来宾的汇编文件实现启动、特权切换、陷阱现场和系统调用入口。宿主键盘和终端的系统差异集中在 `console.cpp` 的平台条件分支。[宿主配置](../CMakeLists.txt) · [来宾配置](../OS/CMakeLists.txt) · [平台终端](../VM/console.cpp)
 
@@ -41,15 +42,17 @@ python tools/mkdisk.py build/debug/images/kernel.bin build/debug/images/alternat
 | `boot.console` | 用真固件和真磁盘启动。检查命令结果、CRLF、退格、错误命令、超长行恢复及关机 |
 | `boot.user` | 在同一次启动中运行两次用户程序，中间触发一次受保护设备读取故障。核对定时器计数前进、正常退出和 shell 恢复 |
 | `boot.tasks` | 观察双方主动让出和同地址私有数据，验证定时器打断纯计算、恢复后的校验值及单任务故障后的运行顺序。用 PATH 中的 `llvm-nm` 读取本次 `user.elf` 的循环边界 |
-| `boot.files` | 通过 VFS 列出磁盘根目录和 `/proc`，解析含 `.`、`..` 的路径，运行三个磁盘 ELF，检查文件与目录混用时的诊断 |
+| `boot.files` | 通过 VFS 列出磁盘根目录和 `/proc`，解析含 `.`、`..` 的路径，运行四个磁盘 ELF，检查文件与目录混用时的诊断 |
 | `disk.vfs_vm` | 在标准盘和替换盘运行真实用户程序，检查按需补页、按打开时间生成的内存快照、跨页读取、页池耗尽和任务回收 |
 | `disk.fork` | 用替换盘检查父子页框计数、原子指令缺页重试、跨页读取失败时文件偏移与缓冲区的原子性、满池写入、退出顺序与定时器抢占 |
-| `disk.rsfs` | 用不同磁盘检查目录 CRC、重名、相交、容量越界、截断和旧盘兼容。另损坏一个文件并确认同盘其他文件可读 |
+| `disk.rsfs` | 检查目录 CRC、重名、相交、容量越界、截断、独立文件校验和旧盘兼容。另用满 64 KiB 的文件覆盖缓存的所有子页，并执行文件末尾的入口 |
+| `disk.exec` | 让子进程、父进程及单独进程分别换入新 ELF，检查新入口的寄存器、清零的栈与 BSS、继承的文件偏移、失败时保留原程序，以及父先换程序时子仍能执行旧代码 |
 | `disk.elf` | 给同一内核换一张盘，观察新程序以 37 退出、向只读代码写入时触发页故障，以及多种无效 ELF 被拒绝。重复装载同一程序还会检查数据和 BSS 是否恢复初值 |
 | `boot.ring-wrap` | 为内核载荷附加内容不同的扇区，让 8 项 virtqueue 重用槽位，核对整段 CRC 并启动 |
 | `boot.bad-header`、`boot.bad-crc`、`boot.bad-size`、`boot.short-disk` | 分别破坏魔数、内核载荷、内核长度和扇区容量。确认固件报告对应原因，退出前未进入 shell |
 | `vm.instructions` | 整数边界、Zicond、CSR、特权切换、PMP、Sv39、跨页取指及 Sstc。双根表用例执行真实的 `satp` 切换，分别验证同一虚拟地址的取指、数据和权限 |
 | `vm.atomics` | 测试 LR/SC、九类 AMO 的两种宽度、符号扩展、页表别名、访问权限、碰撞后的重新尝试 |
+| `vm.svnapot` | 用非恒等映射逐页取指，检查 64 KiB 的两端、跨页数据读写、保留编码、Svade 与 PMP |
 | `vm.bitmanip`、`vm.compressed` | 用已知编码检查位操作、压缩展开、Zcb、提示编码及保留编码 |
 | `vm.virtio` | 比对磁盘和 DMA 缓冲区，检查完成长度、越界地址、只读请求、异常描述符链，以及设备改写 RAM 后 LR 保留是否失效 |
 
@@ -69,7 +72,7 @@ ctest --preset release
 python tests/reference.py (Get-Command qemu-system-riscv64).Source build/debug/images
 ```
 
-脚本选择 `virt` 板和 `rva23s64,pmp=on`。此板的固件在把控制权交给 S 模式前会设置 PMP，因此显式打开该机器级设施。块设备设为现代 virtio-mmio、只读原始镜像，固件和内核各自扫描设备插槽。测试通过本机回环串口等待提示符，检查 `info`、回显，并执行与自研 VM 相同的用户态、双任务和磁盘文件会话，包含 `run hello.elf`。向 CMake 提供 `-DRS_REFERENCE_QEMU=<可执行文件绝对路径>` 会额外注册 `reference.rva23s64`。[参考机测试](../tests/reference.py) · [QEMU virt 板文档](https://www.qemu.org/docs/master/system/riscv/virt.html)
+脚本选择 `virt` 板和 `rva23s64,pmp=on`。此板的固件在把控制权交给 S 模式前会设置 PMP，因此显式打开该机器级设施。块设备设为现代 virtio-mmio、只读原始镜像，固件和内核各自扫描设备插槽。测试通过本机回环串口等待提示符，检查 `info`、回显，并执行与自研 VM 相同的用户态、双任务和磁盘文件会话，其中包括 `run /launch.elf`。向 CMake 提供 `-DRS_REFERENCE_QEMU=<可执行文件绝对路径>` 会额外注册 `reference.rva23s64` 和 `reference.exec`。后者在替换盘上复用 `disk.exec` 的程序和断言。[参考机测试](../tests/reference.py) · [映像替换测试](../tests/exec_tests.py) · [QEMU virt 板文档](https://www.qemu.org/docs/master/system/riscv/virt.html)
 
 参考脚本用 `-icount shift=6,align=off,sleep=off` 让 QEMU 的虚拟时间随来宾指令数推进。若按宿主墙钟计时，较快的主机可能让 A 在第一个时间片内算完整个循环。两台机器的回归均要求中断实际落在循环内，允许中断 PC 和总 tick 数因机器而异。[双任务验收](../tests/task_session.py) · [QEMU 指令计时](https://www.qemu.org/docs/master/devel/tcg-icount.html)
 

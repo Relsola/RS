@@ -3,6 +3,7 @@
 #include "platform.h"
 #include "user/abi.h"
 #include "user_files.h"
+#include "vfs.h"
 
 enum {
     TIMER_PERIOD = 32768,
@@ -66,11 +67,10 @@ static void prepare_frame(unsigned slot, uintptr_t entry, unsigned program_mode)
     task->state = RUNNABLE;
 }
 
-static void enter_single_task(uintptr_t entry, unsigned program_mode)
+static void enter_single_task(void)
 {
     fixed_pair = false;
     time_sliced = false;
-    prepare_frame(0, entry, program_mode);
     tasks[1].state = SLOT_FREE;
     enter_tasks();
 }
@@ -78,20 +78,55 @@ static void enter_single_task(uintptr_t entry, unsigned program_mode)
 void run_user(bool fault)
 {
     user_prepare(0);
-    enter_single_task(USER_ENTRY, fault ? RS_USER_FAULT : RS_USER_HELLO);
+    prepare_frame(0, USER_ENTRY, fault ? RS_USER_FAULT : RS_USER_HELLO);
+    enter_single_task();
 }
 
-const char *run_elf(const uint8_t *file, size_t size)
+static const char *load_program(unsigned slot, const char *path)
 {
-    ElfImage image;
-    const char *error = elf_parse(file, size, &image);
+    VfsFile file;
+    const char *error = vfs_open(path, &file);
     if (error) {
         return error;
     }
-    user_prepare_elf(&image);
+    const uint8_t *bytes;
+    error = vfs_contents(&file, &bytes);
+    if (error) {
+        return error;
+    }
+    ElfImage image;
+    error = elf_parse(bytes, file.size, &image);
+    if (error) {
+        return error;
+    }
+    /* 固定的 ELF 页缓冲已经预留。通过完整验证后，下面的替换无需再次分配资源。 */
+    user_prepare_elf(slot, &image);
     sync_user_instructions();
-    enter_single_task(image.entry, 0);
+    prepare_frame(slot, image.entry, 0);
     return nullptr;
+}
+
+const char *run_elf(const char *path)
+{
+    const char *error = load_program(0, path);
+    if (error) {
+        return error;
+    }
+    enter_single_task();
+    return nullptr;
+}
+
+static void exec_current(TrapFrame *frame)
+{
+    char path[VFS_PATH_BYTES];
+    if (!user_copy_path(current, path, sizeof(path), frame->x[REG_A0], frame->x[REG_A1]) ||
+        load_program(current, path)) {
+        frame->x[REG_A0] = UINT64_MAX;
+        return;
+    }
+    /* 下一次 sret 使用刚准备的新现场。ASID 和根页表地址都没变，也要同步旧翻译。 */
+    discard_lr_reservation();
+    user_activate(current);
 }
 
 void run_tasks(TaskDemo demo)
@@ -296,6 +331,9 @@ TrapFrame *supervisor_dispatch(TrapFrame *frame, uint64_t cause, uint64_t value)
         break;
     case RS_SYS_WAIT:
         return wait_child(frame);
+    case RS_SYS_EXEC:
+        exec_current(frame);
+        break;
     case RS_SYS_YIELD:
         frame->x[REG_A0] = 0;
         return schedule("yield", frame->epc - 4);

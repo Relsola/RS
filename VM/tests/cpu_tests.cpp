@@ -530,6 +530,48 @@ static void test_timer_retrigger()
     check(cpu.trapped && cpu.mepc == 0x4c && cpu.minstret == 4, "level timer retriggers after MRET");
 }
 
+static void test_svinval()
+{
+    Bus bus{};
+    auto probe = [&](Privilege mode, bool tvm, uint32_t word, bool allowed) {
+        Cpu cpu{};
+        cpu.pmpcfg[0] = 0x0f;
+        cpu.pmpaddr[0] = bus.ram.size() >> 2;
+        cpu.privilege = mode;
+        cpu.mstatus = tvm ? (1u << 20) : 0;
+        cpu.pc = 0x40;
+        // rs1 甚至可以持有非规范地址，SINVAL.VMA 不会用它发起显式访存。
+        cpu.x[1] = uint64_t{1} << 38;
+        cpu.x[2] = 7;
+        run_one(&cpu, &bus, word);
+        if (allowed) {
+            check(!cpu.trapped && cpu.pc == 0x44 && cpu.minstret == 1, "Svinval retires");
+        } else {
+            check(cpu.trapped && cpu.mcause == 2 && cpu.mtval == word &&
+                  cpu.mepc == 0x40 && cpu.minstret == 0, "Svinval precise illegal instruction");
+        }
+    };
+    constexpr uint32_t sinval = 0x16000073, before = 0x18000073, after = 0x18100073;
+    for (uint32_t word : {sinval, sinval | (1u << 15), sinval | (2u << 20),
+                          sinval | (1u << 15) | (2u << 20), 0x12000073u /* SFENCE.VMA */}) {
+        probe(MACHINE, true, word, true);
+        probe(SUPERVISOR, false, word, true);
+        probe(SUPERVISOR, true, word, false);
+        probe(USER, false, word, false);
+    }
+    for (uint32_t word : {before, after}) {
+        probe(MACHINE, true, word, true);
+        probe(SUPERVISOR, false, word, true);
+        probe(SUPERVISOR, true, word, true);
+        probe(USER, false, word, false);
+    }
+    // 固定的 rd、rs1、rs2 字段参与译码。HINVAL 的两种编码需要 H 扩展。
+    for (uint32_t word : {sinval | (1u << 7), before | (1u << 15), before | (2u << 20),
+                          after | (1u << 7), 0x26000073u, 0x66000073u}) {
+        probe(MACHINE, false, word, false);
+    }
+}
+
 // S 态切换代码在两套页表中指向同一物理页，用户代码和数据则故意映射到不同页。
 static void test_satp_switch()
 {
@@ -603,6 +645,7 @@ static void test_satp_switch()
 
 int main()
 {
+    test_svinval();
     test_satp_switch();
     test_alu();
     test_load_and_branch();

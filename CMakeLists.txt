@@ -32,7 +32,7 @@ if(BUILD_TESTING)
             "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
         set_tests_properties(boot.${scenario} PROPERTIES TIMEOUT 30)
     endforeach()
-    foreach(format IN ITEMS rsfs elf vfs_vm fork)
+    foreach(format IN ITEMS rsfs elf vfs_vm fork exec)
         add_test(NAME disk.${format} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/${format}_tests.py" "$<TARGET_FILE:rs-vm>"
             "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
@@ -43,5 +43,9 @@ if(BUILD_TESTING)
         add_test(NAME reference.rva23s64 COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference.py" "${RS_REFERENCE_QEMU}" "${CMAKE_BINARY_DIR}/images")
         set_tests_properties(reference.rva23s64 PROPERTIES TIMEOUT 30)
+        add_test(NAME reference.exec COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec_tests.py" --qemu "${RS_REFERENCE_QEMU}"
+            "${CMAKE_BINARY_DIR}/images/firmware.bin" "${CMAKE_BINARY_DIR}/images/disk.img")
+        set_tests_properties(reference.exec PROPERTIES TIMEOUT 90)
     endif()
 endif()

@@ -70,17 +70,12 @@ static const char *file_command(const char *command, const char *name)
     if (!*name) {
         return run ? "usage: run NAME" : "usage: cat NAME";
     }
+    if (run) {
+        return run_elf(name);
+    }
     VfsFile file;
     const char *error = vfs_open(name, &file);
-    if (error) {
-        return error;
-    }
-    if (!run) {
-        return print_file(&file);
-    }
-    const uint8_t *bytes;
-    error = vfs_contents(&file, &bytes);
-    return error ? error : run_elf(bytes, file.size);
+    return error ? error : print_file(&file);
 }
 
 static void execute(char *line)

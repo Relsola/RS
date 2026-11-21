@@ -6,7 +6,23 @@ import tempfile
 import zlib
 
 from boot import run_guest
+from elf_tests import BASE, ELF_HEADER, PROGRAM_HEADER, executable
 from serial_session import command_output
+
+
+def full_cache_elf():
+    # Each 4 KiB slice has distinct bytes. The ELF header and the final ECALL
+    # occupy opposite ends of the RSFS cache, and the file CRC covers every slice.
+    page = 4096
+    contents = bytearray(b"".join(bytes([i]) * page for i in range(16)))
+    exit37 = struct.pack("<III", 0x02500513, 0x00300893, 0x00000073)
+    # Map just the final instructions. The disk checksum still scans all 64 KiB.
+    entry = BASE + page - len(exit37)
+    contents[:ELF_HEADER.size] = executable(exit37, entry=entry)[:ELF_HEADER.size]
+    PROGRAM_HEADER.pack_into(contents, ELF_HEADER.size, 1, 5, len(contents) - len(exit37),
+                             entry, entry, len(exit37), len(exit37), page)
+    contents[-len(exit37):] = exit37
+    return contents
 
 
 def main():
@@ -32,10 +48,10 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         disk_path = Path(temp) / "fixture.img"
 
-        def boot(label, image, checks):
+        def boot(label, image, checks, **guest_options):
             disk_path.write_bytes(image)
             commands = b"".join(command + b"\n" for command, _ in checks) + b"halt\n"
-            rc, output, errors = run_guest(args.vm, args.firmware, disk_path, commands)
+            rc, output, errors = run_guest(args.vm, args.firmware, disk_path, commands, **guest_options)
             if rc or b"System halted." not in output:
                 raise AssertionError(f"{label}: exit={rc} serial={output!r} stderr={errors!r}")
             for command, expected in checks:
@@ -88,6 +104,15 @@ def main():
         text = original[text_lba * sector:text_lba * sector + text_size]
         boot("independent file checksums", image, [(b"run hello.elf", b"run: file CRC mismatch\n"),
                                                    (b"cat readme.txt", text.replace(b"\r\n", b"\n"))])
+
+        full_file = full_cache_elf()
+        image = bytearray(original)
+        struct.pack_into("<III", image, elf_record + 20, len(image) // sector,
+                         len(full_file), zlib.crc32(full_file))
+        struct.pack_into("<I", image, directory + 8, zlib.crc32(image[directory + 12:directory + sector]))
+        image.extend(full_file)
+        boot("64 KiB cache through its final byte", image, [(b"run hello.elf", b"user exit: 37\n")],
+             max_steps=8_000_000)
 
 
 if __name__ == "__main__":

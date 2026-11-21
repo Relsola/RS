@@ -6,14 +6,14 @@ from serial_session import command_output
 
 FILE_COMMANDS = (b"ls\nls /proc\ncat readme.txt\ncat /proc/..//./readme.txt\n"
                  b"cat /readme.txt/..\nrun hello.elf\nrun readme.txt\ncat missing\n"
-                 b"run /memory.elf\nrun /family.elf\n")
+                 b"run /memory.elf\nrun /family.elf\nrun /launch.elf\n")
 
 
 def check_file_session(serial, images):
     serial = serial.replace(b"\r\n", b"\n")
     readme = (Path(__file__).resolve().parents[1] / "OS/files/readme.txt").read_bytes()
     listing = f"readme.txt  {len(readme)} bytes\n"
-    for name in ("hello.elf", "memory.elf", "family.elf"):
+    for name in ("hello.elf", "memory.elf", "family.elf", "launch.elf"):
         listing += f"{name}  {(images / name).stat().st_size} bytes\n"
     contents = readme.replace(b"\r\n", b"\n")
     expected = {
@@ -28,6 +28,8 @@ def check_file_session(serial, images):
         b"run /memory.elf": contents + b"memory.elf: file copied, pages released\nuser exit: 0\n",
         b"run /family.elf": (b"child: page=C file=_\nchild exit: 37\n"
                              b"parent: page=P file=p wait=37\nuser exit: 0\n"),
+        b"run /launch.elf": (b"hello from disk ELF\nchild exit: 0\n"
+                             b"launch: child completed\nuser exit: 0\n"),
     }
     for command, body in expected.items():
         actual = command_output(serial, command)

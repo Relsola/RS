@@ -15,5 +15,6 @@ void *user_map(size_t bytes);
 long user_unmap(void *base);
 long user_fork(void);
 long user_wait(long child);
+long user_exec(const char *path, size_t length);
 
 #endif

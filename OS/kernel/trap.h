@@ -23,7 +23,7 @@ static_assert(sizeof(TrapFrame) == RS_TRAP_FRAME_BYTES);
 void timer_start(void);
 uint64_t timer_ticks(void);
 void run_user(bool fault);
-const char *run_elf(const uint8_t *file, size_t size);
+const char *run_elf(const char *path);
 typedef enum { TASKS_YIELD, TASKS_PREEMPT, TASKS_FAULT, TASKS_MEMORY } TaskDemo;
 void run_tasks(TaskDemo demo);
 #endif

@@ -20,6 +20,7 @@
     syscall user_unmap, RS_SYS_UNMAP
     syscall user_fork,  RS_SYS_FORK
     syscall user_wait,  RS_SYS_WAIT
+    syscall user_exec,  RS_SYS_EXEC
 
     .section .text.user_yield_reserved, "ax"
     .globl user_yield_reserved
