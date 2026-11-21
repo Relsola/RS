@@ -1,0 +1,52 @@
+# RS · 一台从磁盘启动的 RISC-V 计算机
+
+RS 把一台计算机的两侧放在一个工程里。`VM/` 是用 C 风格 C++23 写的 64 位 RISC-V 解释器，`OS/` 是这台机器执行的启动固件和 C23 内核。输入 `echo hello` 时，从键盘读取、串口寄存器、页表翻译到命令解析，都能在源码里找到。项目以 **RVA23S64** 为长期标准目标，当前交付的是能运行自制 OS 的教学子集。已实现的能力和标准差距见[规范覆盖](docs/rva23s64.md)。
+
+## 在 Windows 上运行
+
+准备 LLVM（构建用 `clang`、`ld.lld`、`llvm-objcopy`，抢占测试还用到 `llvm-nm`）、Visual Studio 的 x64 C++ 构建工具和 Windows SDK、CMake 3.29 或更新版、Ninja、Python 3。让 LLVM、CMake、Ninja 和 Python 进入 PATH。在工程根目录打开 PowerShell，用下面的命令启动。
+
+```powershell
+.\build.bat run
+```
+
+首次运行会构建虚拟机、固件和启动盘。下面是一段实际的串口会话。
+
+```text
+rs> info
+RS OS | RV64 supervisor mode | MMU: Sv39 | boot: virtio-blk | console: 16550 UART
+rs> echo hello
+hello
+rs> halt
+System halted.
+```
+
+`help` 列出命令，退格可编辑当前行。`halt` 从内核发起关机，返回宿主终端。Shell 和内核运行在 S 模式，使用只读启动盘。下面的命令可以观察用户程序进入内核，以及两个用户任务共用一颗 CPU 的过程。
+
+| 在 `rs>` 输入 | 可以观察什么 |
+| --- | --- |
+| `ticks` | 查看内核实际处理过的监管定时器中断次数 |
+| `user` | 进入 U 模式，等待一次计时进展，通过系统调用打印 `hello from user mode`，随后返回 shell |
+| `user fault` | 用户程序读取只允许监管态访问的串口页，内核报告页故障。回到提示符后可以继续输入命令 |
+| `tasks yield` | A、B 主动交出 CPU。它们使用同一虚拟地址，切换后各自读回 11 和 22 |
+| `tasks preempt` | A 进行纯计算时被时钟中断，B 先完成，A 恢复后输出校验值 `0x0ed55926` |
+| `tasks fault` | A 读取受保护的串口页后终止，B 仍能完成并回到 shell |
+
+| Windows 入口 | 作用 |
+| --- | --- |
+| `.\build.bat` | 构建 Debug，生成宿主程序和来宾镜像 |
+| `.\build.bat run` | 构建并启动交互系统 |
+| `.\build.bat test` | 构建并运行 CPU、设备、启动及错误路径测试 |
+| `.\build.bat release` | 生成独立的 Release 构建 |
+
+日常运行使用自研解释器。QEMU 仅供可选的交叉验证。宿主和来宾分别调用 `clang`，Windows 宿主用微软的 `link.exe` 和运行库，RISC-V 来宾用 `ld.lld` 和自己的启动代码。构建产物、调试方式和复现命令见[构建与验证](docs/build.md)。
+
+## 从哪里开始读
+
+1. [整机架构与指令执行](docs/architecture.md)给出物理地址图。跟随 `cpu_step` 看一条指令如何改变机器状态。
+2. [从虚拟磁盘启动到第一条命令](docs/boot.md)跟踪固件读盘、内核接管和串口交互。
+3. [特权与地址翻译](docs/privilege-memory.md)解释一次内存访问如何经过 Sv39 和 PMP，以及异常发生时可以看哪些寄存器。
+4. [用户程序、系统调用与定时器](docs/user-timer.md)追踪同一个程序进入内核的三条路径，分别对应系统调用、时钟中断和页故障。
+5. [单核上的两个用户任务](docs/tasks.md)从串口输出找到 A 被抢占的那一条指令，再看 B 如何取得自己的寄存器和内存。
+6. [原子指令与保留集](docs/atomics.md)解释 LR/SC、设备写入与任务切换之间的关系。
+7. [RVA23S64 规范覆盖](docs/rva23s64.md)列出已实现的能力及标准差距。

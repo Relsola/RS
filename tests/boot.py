@@ -1,0 +1,85 @@
+"""Exercise the complete reset -> disk -> supervisor kernel path."""
+import argparse
+import struct
+import subprocess
+import tempfile
+import zlib
+from pathlib import Path
+
+from user_session import COMMANDS, check_user_session
+from task_session import TASK_COMMANDS, check_task_session
+
+
+def run_guest(vm, firmware, disk, commands):
+    process = subprocess.run(
+        [vm, "--firmware", firmware, "--disk", disk, "--max-steps", "6000000"],
+        input=commands, capture_output=True, timeout=15,
+    )
+    return process.returncode, process.stdout.replace(b"\r\n", b"\n"), process.stderr
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("case", choices=("console", "user", "tasks", "ring-wrap", "bad-header", "bad-crc",
+                                         "bad-size", "short-disk"))
+    parser.add_argument("vm", type=Path)
+    parser.add_argument("firmware", type=Path)
+    parser.add_argument("disk", type=Path)
+    args = parser.parse_args()
+
+    if args.case == "console":
+        commands = (b"help\r\ninfo\necho hellx\x08o\r\nwhat\n"
+                    + b"x" * 128 + b"\necho after overflow\nhalt\n")
+        rc, output, error = run_guest(args.vm, args.firmware, args.disk, commands)
+        expected = (b"RS firmware: kernel verified\n", b"RS OS ready.",
+                    b"echo TEXT   print TEXT", b"RV64 supervisor mode | MMU: Sv39",
+                    b"\nhello\nrs> ", b"unknown command: what\n", b"line too long\n",
+                    b"\nafter overflow\nrs> ", b"System halted.\n")
+        passed = rc == 0 and all(fragment in output for fragment in expected)
+    elif args.case == "user":
+        rc, output, error = run_guest(args.vm, args.firmware, args.disk, COMMANDS)
+        if rc == 0:
+            check_user_session(output)
+        passed = rc == 0
+    elif args.case == "tasks":
+        rc, output, error = run_guest(args.vm, args.firmware, args.disk, TASK_COMMANDS + b"halt\n")
+        if rc == 0:
+            check_task_session(output, args.disk.with_name("user.elf"))
+        passed = rc == 0
+    elif args.case == "ring-wrap":
+        # Distinct trailing sectors force both rings to revisit slots before CRC validation,
+        # even if a future kernel shrinks to fit in the 8-entry queue.
+        image = args.disk.read_bytes()
+        size, = struct.unpack_from("<I", image, 8)
+        kernel = image[512:512 + size] + b"".join(bytes([i]) * 512 for i in range(1, 13))
+        header = struct.pack("<8sII", b"RSDISK01", len(kernel), zlib.crc32(kernel))
+        with tempfile.TemporaryDirectory() as tmp:
+            disk = Path(tmp) / "many-sectors.img"
+            disk.write_bytes(header.ljust(512, b"\0") + kernel + bytes(-len(kernel) % 512))
+            rc, output, error = run_guest(args.vm, args.firmware, disk, b"halt\n")
+        passed = rc == 0 and b"kernel verified" in output and b"System halted." in output
+    else:
+        image = bytearray(args.disk.read_bytes())
+        if args.case == "bad-header":
+            image[0] ^= 1
+            expected = b"invalid disk magic"
+        elif args.case == "bad-crc":
+            image[512] ^= 1
+            expected = b"kernel CRC mismatch"
+        elif args.case == "bad-size":
+            struct.pack_into("<I", image, 8, 0xffffffff)
+            expected = b"invalid kernel size"
+        else:
+            del image[512:]
+            expected = b"truncated kernel"
+        with tempfile.TemporaryDirectory() as tmp:
+            disk = Path(tmp) / "broken.img"
+            disk.write_bytes(image)
+            rc, output, error = run_guest(args.vm, args.firmware, disk, b"halt\n")
+        passed = rc == 1 and b"boot error: " + expected in output and b"RS OS ready" not in output
+    if not passed:
+        raise SystemExit(f"exit={rc}\nserial={output!r}\nstderr={error!r}")
+
+
+if __name__ == "__main__":
+    main()
