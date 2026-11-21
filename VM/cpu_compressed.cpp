@@ -61,6 +61,18 @@ static uint32_t quadrant_zero(uint16_t code)
         const unsigned imm = field(code, 12, 10, 3) | field(code, 6, 5, 6);
         return operation == 3 ? i_type(0x03, 3, reg, base, imm) : store(3, base, reg, imm);
     }
+    case 4: { // Zcb：字节偏移的 bit 0 在编码 bit 6，bit 1 在编码 bit 5。
+        const unsigned half_offset = field(code, 5, 5, 1);
+        const unsigned bit6 = field(code, 6, 6);
+        const unsigned byte_offset = half_offset | bit6;
+        switch (field(code, 12, 10)) {
+        case 0: return i_type(0x03, 4, reg, base, byte_offset);               // C.LBU
+        case 1: return i_type(0x03, bit6 ? 1 : 5, reg, base, half_offset);    // C.LH / C.LHU
+        case 2: return store(0, base, reg, byte_offset);                      // C.SB
+        case 3: return bit6 ? 0 : store(1, base, reg, half_offset);           // C.SH
+        default: return 0;
+        }
+    }
     default: return 0; // 浮点或其他扩展的编码。
     }
 }
@@ -81,6 +93,17 @@ static uint32_t compact_alu(uint16_t code, uint32_t imm6)
     case 3: return r_type(0x33, 7, 0, rd, rd, rs2);    // C.AND
     case 4: return r_type(0x3b, 0, 0x20, rd, rd, rs2); // C.SUBW
     case 5: return r_type(0x3b, 0, 0, rd, rd, rs2);    // C.ADDW
+    case 6: return r_type(0x33, 0, 1, rd, rd, rs2);    // C.MUL
+    case 7: // Zcb 单操作数格式将原来的 rs2 字段用作操作编号。
+        switch (field(code, 4, 2)) {
+        case 0: return i_type(0x13, 7, rd, rd, 0x0ff);     // C.ZEXT.B -> ANDI
+        case 1: return i_type(0x13, 1, rd, rd, 0x604);     // C.SEXT.B -> SEXT.B
+        case 2: return r_type(0x3b, 4, 0x04, rd, rd, 0);   // C.ZEXT.H -> ZEXT.H
+        case 3: return i_type(0x13, 1, rd, rd, 0x605);     // C.SEXT.H -> SEXT.H
+        case 4: return r_type(0x3b, 0, 0x04, rd, rd, 0);   // C.ZEXT.W -> ADD.UW rd,rd,x0
+        case 5: return i_type(0x13, 4, rd, rd, 0xfff);     // C.NOT -> XORI
+        default: return 0;
+        }
     default: return 0;
     }
 }

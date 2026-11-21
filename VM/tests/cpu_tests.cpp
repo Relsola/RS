@@ -129,6 +129,55 @@ static void test_load_and_branch()
     check(cpu.trapped && cpu.mcause == 7 && cpu.mtval == bus.ram.size(), "store access fault");
 }
 
+static void test_zcb_memory()
+{
+    Bus bus{};
+    Cpu cpu{};
+    cpu.x[11] = 0x100;
+    cpu.x[10] = 0xabcdef01234580da;
+    check(bus_store(&bus, 0x100, 8, UINT64_MAX), "initialize surrounding bytes");
+    run_one(&cpu, &bus, 0x8da8); // c.sh a0, 2(a1)
+    run_one(&cpu, &bus, 0x89c8); // c.sb a0, 1(a1)
+    uint64_t stored = 0;
+    check(bus_load(&bus, 0x100, 8, &stored) && stored == 0xffffffff80dadaff, "Zcb exact stores");
+    run_one(&cpu, &bus, 0x85a8); // c.lhu a0, 2(a1)
+    check(cpu.x[10] == 0x80da, "C.LHU zero extends");
+    run_one(&cpu, &bus, 0x85e8); // c.lh a0, 2(a1)
+    check(cpu.x[10] == 0xffffffffffff80da, "C.LH sign extends");
+    run_one(&cpu, &bus, 0x81e8); // c.lbu a0, 3(a1)
+    check(cpu.x[10] == 0x80 && cpu.pc == 10 && cpu.minstret == 5, "C.LBU retires one halfword");
+    cpu.x[11] = bus.ram.size();
+    run_one(&cpu, &bus, 0x8da8);
+    check(cpu.trapped && cpu.mcause == 7 && cpu.mtval == bus.ram.size() + 2 &&
+          cpu.mepc == 10 && cpu.minstret == 5, "C.SH has precise store access fault");
+}
+
+static void test_zicond()
+{
+    Cpu cpu{};
+    Bus bus{};
+    const uint64_t high = uint64_t{1} << 63;
+    cpu.x[10] = high;
+    cpu.x[11] = high + 9;
+    run_one(&cpu, &bus, 0x0ea5d533); // czero.eqz a0,a1,a0，条件只有最高位为 1。
+    check(cpu.x[10] == high + 9, "CZERO.EQZ preserves rs1 for nonzero rs2 alias");
+    run_one(&cpu, &bus, 0x0eb57533); // czero.nez a0,a0,a1
+    check(cpu.x[10] == 0, "CZERO.NEZ clears rs1 alias for nonzero rs2");
+    run_one(&cpu, &bus, 0x0ea5d533);
+    check(cpu.x[10] == 0, "CZERO.EQZ clears value for zero rs2");
+    cpu.x[10] = high;
+    cpu.x[11] = 0;
+    run_one(&cpu, &bus, 0x0eb57533);
+    check(cpu.x[10] == high && cpu.pc == 16 && cpu.minstret == 4, "CZERO.NEZ preserves full XLEN");
+
+    for (uint32_t encoding : {0x0ea5c533u, 0x0ea5d53bu}) { // 未分配的 funct3 及不存在的 W 形式。
+        cpu.pc = 16;
+        run_one(&cpu, &bus, encoding);
+        check(cpu.trapped && cpu.mcause == 2 && cpu.mepc == 16 && cpu.mtval == encoding &&
+              cpu.x[10] == high && cpu.minstret == 4, "reserved Zicond encoding is illegal");
+    }
+}
+
 static void test_csr_and_trap()
 {
     Cpu cpu{};
@@ -557,6 +606,8 @@ int main()
     test_satp_switch();
     test_alu();
     test_load_and_branch();
+    test_zcb_memory();
+    test_zicond();
     test_csr_and_trap();
     test_privilege();
     test_paging();

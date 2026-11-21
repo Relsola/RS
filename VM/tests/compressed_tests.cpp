@@ -8,7 +8,7 @@ struct Example
     uint32_t expanded;
 };
 
-// 两列分别由 Clang 汇编 RV64C 指令和它的 RV64I 展开式得到。
+// 两列分别由 Clang 汇编压缩指令和它的 32 位展开式得到。
 static constexpr Example EXAMPLES[] = {
     {0x0e74, 0x31c10693}, // c.addi4spn a3, sp, 796
     {0x57f0, 0x06c7a603}, // c.lw a2, 108(a5)
@@ -43,6 +43,22 @@ static constexpr Example EXAMPLES[] = {
     {0x934a, 0x01230333}, // c.add t1, s2
     {0xcbd6, 0x0d512a23}, // c.swsp s5, 212(sp)
     {0xe7ae, 0x1cb13423}, // c.sdsp a1, 456(sp)
+    {0x8000, 0x00044403}, // c.lbu s0, 0(s0)
+    {0x81c8, 0x0015c503}, // c.lbu a0, 1(a1)
+    {0x81a8, 0x0025c503}, // c.lbu a0, 2(a1)
+    {0x81e8, 0x0035c503}, // c.lbu a0, 3(a1)
+    {0x85a8, 0x0025d503}, // c.lhu a0, 2(a1)
+    {0x85e8, 0x00259503}, // c.lh a0, 2(a1)
+    {0x89c8, 0x00a580a3}, // c.sb a0, 1(a1)
+    {0x89a8, 0x00a58123}, // c.sb a0, 2(a1)
+    {0x8da8, 0x00a59123}, // c.sh a0, 2(a1)
+    {0x9d61, 0x0ff57513}, // c.zext.b a0
+    {0x9ce5, 0x60449493}, // c.sext.b s1
+    {0x9fe9, 0x0807c7bb}, // c.zext.h a5
+    {0x9ded, 0x60559593}, // c.sext.h a1
+    {0x9f71, 0x0807073b}, // c.zext.w a4
+    {0x9c75, 0xfff44413}, // c.not s0
+    {0x9d51, 0x02c50533}, // c.mul a0, a2
     // HINT 合法退休，展开计算时写 x0 或保持寄存器的旧值。
     {0x0005, 0x00100013}, // c.nop with imm=1
     {0x0281, 0x00028293}, // c.addi t0, 0
@@ -72,9 +88,10 @@ int main()
         0x6001, 0x6101, 0x6281, // C.LUI / C.ADDI16SP with zero immediate
         0x4002, 0x6002, // C.LWSP / C.LDSP rd=x0
         0x8002,         // C.JR x0
-        0x9c41, 0x9c61, // CA encodings outside RV64C
+        0x9c79, 0x9c7d, // 两个未分配的 Zcb 单操作数编号
+        0x8c40, 0x9000, 0x9400, 0x9800, 0x9c00, // C.SH 的 bit 6、未分配的访存编码
         0x2000, 0xa000, 0x2002, 0xa002, // compressed floating-point instructions
-        0x8000, 0xffff, // unimplemented extension / not a compressed encoding
+        0xffff,         // not a compressed encoding
     };
     for (uint16_t code : ILLEGAL) {
         uint32_t instruction = 0;

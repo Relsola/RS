@@ -62,6 +62,13 @@ bool cpu_integer(uint32_t instruction, uint64_t lhs, uint64_t rhs, uint64_t *res
     const unsigned shift_mask = word ? 31 : 63;
     uint64_t value = 0;
 
+    if ((instruction & 0x7f) == 0x33 && funct7 == 7) { // Zicond，仅 XLEN 的寄存器形式。
+        switch (operation) {
+        case 5: *result = rhs == 0 ? 0 : lhs; return true; // CZERO.EQZ
+        case 7: *result = rhs != 0 ? 0 : lhs; return true; // CZERO.NEZ
+        default: return false;
+        }
+    }
     if (!immediate && funct7 == 1) {
         if (word) {
             if (operation >= 1 && operation <= 3) {
