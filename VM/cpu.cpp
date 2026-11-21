@@ -137,9 +137,16 @@ void cpu_step(Cpu *cpu, Bus *bus)
     case 0x33: case 0x3b: // OP, OP-32
         legal = cpu_integer(insn, a, b, &result);
         break;
-    case 0x0f: // FENCE / FENCE.I：按序执行且每次取指都重新读总线。
+    case 0x0f: // MISC-MEM
         writes_rd = false;
-        legal = function <= 1;
+        if ((insn & 0xfff07fff) == 0x0040200f) { // CBO.ZERO (rs1), rd=x0
+            legal = cpu_zero_block(cpu, bus, a);
+            if (cpu->trapped) {
+                return;
+            }
+        } else {
+            legal = function <= 1; // FENCE / FENCE.I：本机按序执行，每次取指都读总线。
+        }
         break;
     case 0x73: // SYSTEM
         writes_rd = function != 0;

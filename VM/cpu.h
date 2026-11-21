@@ -22,6 +22,8 @@ struct Cpu
     uint64_t mideleg;
     uint64_t mie;
     uint64_t menvcfg;
+    uint64_t senvcfg;
+    uint64_t mstateen[4];
     uint64_t software_stip; // 关闭 Sstc 时由 M 模式设置的挂起位。
     uint64_t mtvec;
     uint64_t mscratch;

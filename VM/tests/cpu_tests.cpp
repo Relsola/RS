@@ -401,6 +401,44 @@ static uint64_t read_csr(Cpu *cpu, Bus *bus, unsigned csr)
     return cpu->x[2];
 }
 
+static void test_state_enable()
+{
+    constexpr uint64_t envcfg = uint64_t{1} << 62, se = uint64_t{1} << 63;
+    constexpr uint64_t cbze = 1u << 7;
+    Bus bus{};
+    Cpu cpu{};
+    cpu.pmpcfg[0] = 0x0f;
+    cpu.pmpaddr[0] = bus.ram.size() >> 2;
+    write_csr(&cpu, &bus, 0x10a, UINT64_MAX);
+    check(read_csr(&cpu, &bus, 0x10a) == cbze, "M accesses senvcfg while ENVCFG is closed");
+    cpu.privilege = SUPERVISOR;
+    write_csr(&cpu, &bus, 0x10a, 0);
+    check(cpu.trapped && cpu.mcause == 2 && cpu.senvcfg == cbze, "ENVCFG denies S write");
+
+    for (unsigned i = 0; i < 4; ++i) {
+        unsigned machine = 0x30c + i, supervisor = 0x10c + i;
+        cpu.privilege = MACHINE;
+        check(read_csr(&cpu, &bus, machine) == 0, "state enable resets to zero");
+        check(read_csr(&cpu, &bus, supervisor) == 0, "M can read subordinate state enable");
+        cpu.privilege = SUPERVISOR;
+        run_one(&cpu, &bus, (supervisor << 20) | 0x02173);
+        check(cpu.trapped && cpu.mcause == 2, "matching SE bit gates each supervisor CSR");
+        write_csr(&cpu, &bus, machine, UINT64_MAX); // Trap entered M.
+        check(read_csr(&cpu, &bus, machine) == (i == 0 ? se | envcfg : se), "state enable WARL mask");
+        cpu.privilege = SUPERVISOR;
+        write_csr(&cpu, &bus, supervisor, UINT64_MAX);
+        check(!cpu.trapped && read_csr(&cpu, &bus, supervisor) == 0, "S state has no writable U fields");
+    }
+    cpu.privilege = MACHINE;
+    write_csr(&cpu, &bus, 0x30c, envcfg); // ENVCFG and SE are independent.
+    cpu.privilege = SUPERVISOR;
+    write_csr(&cpu, &bus, 0x10a, 0);
+    check(!cpu.trapped && read_csr(&cpu, &bus, 0x10a) == 0, "S can change CBZE with ENVCFG alone");
+    cpu.privilege = USER;
+    write_csr(&cpu, &bus, 0x10a, UINT64_MAX);
+    check(cpu.trapped && cpu.mcause == 2 && cpu.senvcfg == 0, "U still cannot write a supervisor CSR");
+}
+
 static void test_timer_csrs()
 {
     constexpr uint64_t sti = 1u << 5, stce = uint64_t{1} << 63;
@@ -417,7 +455,7 @@ static void test_timer_csrs()
     check(read_csr(&cpu, &bus, 0x144) == sti, "sip.STIP is always read-only");
     write_csr(&cpu, &bus, 0x344, 0);
     write_csr(&cpu, &bus, 0x30a, UINT64_MAX);
-    check(read_csr(&cpu, &bus, 0x30a) == stce, "menvcfg implements STCE");
+    check(read_csr(&cpu, &bus, 0x30a) == (stce | (1u << 7)), "menvcfg implements STCE and CBZE");
     write_csr(&cpu, &bus, 0x344, sti);
     check(read_csr(&cpu, &bus, 0x344) == 0, "mip cannot force a future Sstc deadline");
     write_csr(&cpu, &bus, 0x14d, 0);
@@ -657,6 +695,7 @@ int main()
     test_instruction_fetch();
     test_user_page_permissions();
     test_pmp();
+    test_state_enable();
     test_timer_csrs();
     test_timer_delivery();
     test_timer_retrigger();

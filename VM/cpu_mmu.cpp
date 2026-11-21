@@ -3,6 +3,8 @@
 
 #include <bit>
 
+static constexpr unsigned BLOCK_BYTES = 64; // RVA23 的 Zic64b
+
 static TrapCause access_fault(Access access)
 {
     return access == Access::Fetch ? FETCH_FAULT : (access == Access::Load ? LOAD_FAULT : STORE_FAULT);
@@ -24,7 +26,7 @@ static bool pmp_allows(const Cpu *cpu, Privilege mode, Access access, uint64_t a
     switch (access) {
     case Access::Fetch: permission = 4; break;
     case Access::Load:  permission = 1; break;
-    case Access::Store: permission = 2; break;
+    case Access::Store: case Access::ZeroBlock: permission = 2; break;
     case Access::Amo:   permission = 3; break; // AMO 同时要求读和写。
     }
     for (unsigned i = 0; i < 16; ++i) {
@@ -111,8 +113,10 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
                     break;
                 }
                 const bool can_read = read || ((cpu->mstatus & MXR) && execute);
+                const bool needs_write = access == Access::Store || access == Access::Amo ||
+                                         access == Access::ZeroBlock;
                 if ((access == Access::Fetch && !execute) || (access == Access::Load && !can_read) ||
-                    ((access == Access::Store || access == Access::Amo) && (!write || !dirty)) || !accessed) {
+                    (needs_write && (!write || !dirty)) || !accessed) {
                     break; // Svade：缺少 A/D 由软件处理。
                 }
                 const uint64_t page_mask = (uint64_t{1} << (12 + shift)) - 1;
@@ -129,9 +133,34 @@ bool cpu_translate(Cpu *cpu, Bus *bus, Access access, uint64_t va, unsigned widt
             return false;
         }
     }
+    if (access == Access::ZeroBlock) {
+        // 块不会跨越 4 KiB 页。只对物理范围向下对齐，异常仍报告 rs1 的原始虚拟地址。
+        *pa &= ~uint64_t{BLOCK_BYTES - 1};
+    }
     if (!pmp_allows(cpu, mode, access, *pa, width)) {
         cpu_trap(cpu, access_fault(access), va);
         return false;
+    }
+    return true;
+}
+
+bool cpu_zero_block(Cpu *cpu, Bus *bus, uint64_t address)
+{
+    if ((cpu->privilege != MACHINE && !(cpu->menvcfg & CBZE)) ||
+        (cpu->privilege == USER && !(cpu->senvcfg & CBZE))) {
+        return false; // 译码器报告非法指令，先于地址翻译。
+    }
+    uint64_t base;
+    if (!cpu_translate(cpu, bus, Access::ZeroBlock, address, BLOCK_BYTES, &base)) {
+        return true;
+    }
+    if (!bus_is_ram(bus, base, BLOCK_BYTES)) {
+        cpu_trap(cpu, STORE_FAULT, address);
+        return true;
+    }
+    // 整块已通过 PMP 和 RAM 边界检查。走总线的普通写入口会使重叠的 LR 保留失效。
+    for (unsigned offset = 0; offset < BLOCK_BYTES; offset += 8) {
+        bus_store(bus, base + offset, 8, 0);
     }
     return true;
 }

@@ -7,6 +7,7 @@ constexpr uint64_t PMPADDR_MASK = (uint64_t{1} << 54) - 1;
 constexpr unsigned TIMER_CAUSE = 5;
 constexpr uint64_t STI = uint64_t{1} << TIMER_CAUSE;
 constexpr uint64_t STCE = uint64_t{1} << 63;
+constexpr uint64_t STATEEN_ENVCFG = uint64_t{1} << 62, STATEEN_SE = uint64_t{1} << 63;
 constexpr uint64_t TM = 1u << 1;
 
 static void enter_trap(Cpu *cpu, bool delegated, uint64_t cause, uint64_t value)
@@ -73,6 +74,14 @@ static bool counter_read_allowed(const Cpu *cpu, unsigned csr)
 
 static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
 {
+    if (csr >= 0x30c && csr <= 0x30f) { // mstateen0..3
+        *value = cpu->mstateen[csr - 0x30c];
+        return true;
+    }
+    if (csr >= 0x10c && csr <= 0x10f) { // sstateen0..3，本机没有受这些位控制的 U 态扩展状态。
+        *value = 0;
+        return cpu->privilege == MACHINE || (cpu->mstateen[csr - 0x10c] & STATEEN_SE);
+    }
     if (csr >= 0x3b0 && csr < 0x3c0) {
         *value = cpu->pmpaddr[csr - 0x3b0];
         return true;
@@ -90,6 +99,12 @@ static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
     case 0x104: *value = cpu->mie & cpu->mideleg; break; // sie 仅暴露已委托的中断位
     case 0x105: *value = cpu->stvec; break;
     case 0x106: *value = cpu->scounteren; break;
+    case 0x10a:
+        if (cpu->privilege != MACHINE && !(cpu->mstateen[0] & STATEEN_ENVCFG)) {
+            return false;
+        }
+        *value = cpu->senvcfg;
+        break;
     case 0x140: *value = cpu->sscratch; break;
     case 0x141: *value = cpu->sepc; break;
     case 0x142: *value = cpu->scause; break;
@@ -136,6 +151,14 @@ static bool read_csr(const Cpu *cpu, unsigned csr, uint64_t *value)
 
 static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
 {
+    if (csr >= 0x30c && csr <= 0x30f) {
+        uint64_t mask = STATEEN_SE;
+        if (csr == 0x30c) {
+            mask |= STATEEN_ENVCFG;
+        }
+        cpu->mstateen[csr - 0x30c] = value & mask;
+        return;
+    }
     if (csr >= 0x3b0 && csr < 0x3c0) {
         const unsigned i = csr - 0x3b0;
         // 锁定的 TOR 区间同时锁住前一项的地址字段，它定义了下界。
@@ -163,6 +186,7 @@ static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
     case 0x104: cpu->mie = (cpu->mie & ~cpu->mideleg) | (value & cpu->mideleg); break;
     case 0x105: cpu->stvec = value & ~uint64_t{3}; break;
     case 0x106: cpu->scounteren = value & 7; break;
+    case 0x10a: cpu->senvcfg = value & CBZE; break;
     case 0x140: cpu->sscratch = value; break;
     case 0x141: cpu->sepc = value & ~uint64_t{1}; break;
     case 0x142: cpu->scause = value; break;
@@ -187,7 +211,7 @@ static void write_csr(Cpu *cpu, unsigned csr, uint64_t value)
     case 0x304: cpu->mie = value & STI; break;
     case 0x305: cpu->mtvec = value & ~uint64_t{3}; break;
     case 0x306: cpu->mcounteren = value & 7; break;
-    case 0x30a: cpu->menvcfg = value & STCE; break;
+    case 0x30a: cpu->menvcfg = value & (STCE | CBZE); break;
     case 0x340: cpu->mscratch = value; break;
     case 0x341: cpu->mepc = value & ~uint64_t{1}; break;
     case 0x342: cpu->mcause = value; break;
